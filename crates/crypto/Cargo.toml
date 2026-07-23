@@ -1,0 +1,12 @@
+[package]
+name = "sump-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sump-core.workspace = true
+fips204.workspace = true
+rand_core.workspace = true
+rand_chacha.workspace = true
+bech32.workspace = true

@@ -163,9 +163,11 @@ SumpHash follows the dataset/light-cache architecture proven by Ethash,
 rebuilt on standardized SHA3/SHAKE:
 
 - A **fixed 2 GiB dataset** is pseudorandomly generated each 4,096-block
-  epoch (≈2.8 days) from a seed derived from the epoch-boundary block
-  hash. The size never grows: 2 GiB already exceeds feasible on-die ASIC
-  memory by orders of magnitude, and a growing dataset would only
+  epoch (≈2.8 days) from an epoch seed. Seeds form a SHA3 hash chain
+  indexed by epoch number, independent of chain content (as in Ethash),
+  so miners can precompute the next epoch's dataset before the boundary
+  arrives. The size never grows: 2 GiB already exceeds feasible on-die
+  ASIC memory by orders of magnitude, and a growing dataset would only
   obsolete smaller consumer cards over time, as Ethereum's did.
 - A **64 MiB light cache**, generated from the same seed, suffices to
   recompute any dataset item on demand.
@@ -225,18 +227,21 @@ of §8.
 | Total supply | 42,000,000 SUMP (hard cap) |
 | Premine / dev fund | none — fair launch |
 
-**Emission.** Issuance follows a smooth exponential decay — a continuous
-analogue of halvings, with no cliff events. With H = 2,102,400 blocks
-(≈4 years) as the half-life, cumulative issuance after block h is
+**Emission.** Issuance follows a smooth geometric decay — a continuous
+analogue of halvings, with no cliff events — defined entirely in integer
+arithmetic with an exact rational base (no transcendental constants in
+consensus code). With M = 3,033,415 and C = 42,000,000 SUMP, the block-h
+subsidy is
 
-  S(h) = 42,000,000 × (1 − 2^(−h/H)) SUMP,
+  R(h) = R₀ × ((M−1)/M)ʰ,  R₀ = ⌊C/M⌋ = 1,384,578,109 stanzas ≈ 13.8458 SUMP,
 
-and the block-h reward is R(h) = S(h+1) − S(h), computed in integer
-stanzas by a deterministic fixed-point rule pinned in the specification.
-The initial reward is ≈13.85 SUMP, falling to half of any given level
-every four years; half of all SUMP exists after year 4, three quarters
-after year 8. Miners additionally collect transaction fees, which become
-the dominant incentive as issuance decays.
+evaluated in Q96 fixed point by square-and-multiply. The half-life is
+M·ln2 ≈ 2,102,573 blocks ≈ 4 years: the reward falls to half of any given
+level every four years, half of all SUMP exists after year 4, three
+quarters after year 8. Because ∑R(h) = R₀·M and all rounding is downward,
+total issuance is ≤ C by construction — the cap needs no separate
+enforcement rule. Miners additionally collect transaction fees, which
+become the dominant incentive as issuance decays.
 
 ## 8. Scaling path: STARK witness compression
 
@@ -272,7 +277,13 @@ quantum defense is complete without it.
 
 Summerpoem launches fairly: no premine, no developer allocation, no
 early-access period. The founding team mines the early chain under the
-same rules as any participant.
+same rules as any participant. The genesis subsidy itself is paid to the
+all-zero key hash — provably unspendable by anyone, founders included.
+
+A reference implementation in Rust — full consensus validation, wallet,
+genesis builder, and CPU reference miner, with regression and integration
+test coverage — accompanies this paper and serves as the executable
+specification until a formal one is written.
 
 There is no public testnet phase. With nothing at stake at genesis, the
 early mainnet serves that role — as Bitcoin's did. Two commitments make

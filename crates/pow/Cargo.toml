@@ -1,0 +1,9 @@
+[package]
+name = "sump-pow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sump-core.workspace = true
+primitive-types.workspace = true

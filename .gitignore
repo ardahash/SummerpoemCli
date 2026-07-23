@@ -1,1 +1,7 @@
 DESIGN.md
+/target
+Cargo.lock
+sumpchain*/
+*.wallet.json
+wallet.json
+*.tx

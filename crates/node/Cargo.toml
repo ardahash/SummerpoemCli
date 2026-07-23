@@ -1,0 +1,12 @@
+[package]
+name = "sump-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sump-core.workspace = true
+sump-pow.workspace = true
+sump-crypto.workspace = true
+primitive-types.workspace = true
+thiserror.workspace = true

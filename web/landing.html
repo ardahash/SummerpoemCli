@@ -1,0 +1,555 @@
+<title>Summerpoem (SUMP) — quantum-resistant electronic cash</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --paper: #F7F5EC;
+    --ink: #1B241D;
+    --ink-soft: #4A544C;
+    --line: #D9D4C2;
+    --gold: #A87A12;
+    --gold-strong: #8A6410;
+    --leaf: #3E6B4A;
+    --card: #FFFFFF;
+    --code-bg: #EFECDF;
+    --chip-bg: #EDEADB;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0E140F;
+      --ink: #EDE8D8;
+      --ink-soft: #A8AC9C;
+      --line: #2A342B;
+      --gold: #E0B54A;
+      --gold-strong: #EDC661;
+      --leaf: #7FB08B;
+      --card: #151D16;
+      --code-bg: #1A231B;
+      --chip-bg: #1A231B;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #F7F5EC;
+    --ink: #1B241D;
+    --ink-soft: #4A544C;
+    --line: #D9D4C2;
+    --gold: #A87A12;
+    --gold-strong: #8A6410;
+    --leaf: #3E6B4A;
+    --card: #FFFFFF;
+    --code-bg: #EFECDF;
+    --chip-bg: #EDEADB;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0E140F;
+    --ink: #EDE8D8;
+    --ink-soft: #A8AC9C;
+    --line: #2A342B;
+    --gold: #E0B54A;
+    --gold-strong: #EDC661;
+    --leaf: #7FB08B;
+    --card: #151D16;
+    --code-bg: #1A231B;
+    --chip-bg: #1A231B;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+  }
+  .mono {
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+  }
+
+  .wrap {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 0 1.25rem;
+  }
+
+  /* ---------- hero ---------- */
+  header.hero {
+    padding: 5rem 0 3.5rem;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 0 0 2rem;
+  }
+  .verse {
+    font-style: italic;
+    font-weight: 400;
+    font-size: clamp(1.9rem, 5.4vw, 3.1rem);
+    line-height: 1.22;
+    margin: 0 0 1.6rem;
+    text-wrap: balance;
+  }
+  .verse .gold { color: var(--gold); }
+  .hero-sub {
+    max-width: 36rem;
+    color: var(--ink-soft);
+    margin: 0 0 2rem;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 2.4rem; padding: 0; list-style: none; }
+  .chip {
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    padding: 0.34rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--chip-bg);
+    color: var(--ink-soft);
+  }
+  .chip.live { border-color: var(--leaf); color: var(--leaf); }
+  .chip.tba { border-color: var(--gold); color: var(--gold); }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  a.btn {
+    display: inline-block;
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.85rem;
+    text-decoration: none;
+    padding: 0.7rem 1.2rem;
+    border-radius: 4px;
+  }
+  a.btn-gold {
+    background: var(--gold);
+    color: var(--paper);
+    border: 1px solid var(--gold);
+  }
+  a.btn-gold:hover { background: var(--gold-strong); border-color: var(--gold-strong); }
+  a.btn-ghost {
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  a.btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
+  a.btn:focus-visible, a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+
+  /* ---------- horizon divider ---------- */
+  .horizon {
+    position: relative;
+    height: 17px;
+    margin: 0;
+  }
+  .horizon::before {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .horizon::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 0;
+    width: 32px; height: 16px;
+    background: var(--gold);
+    border-radius: 16px 16px 0 0;
+    opacity: 0.9;
+  }
+
+  /* ---------- sections ---------- */
+  section { padding: 3.2rem 0; }
+  h2 {
+    font-size: 1.55rem;
+    font-weight: 400;
+    font-style: italic;
+    margin: 0 0 0.4rem;
+    text-wrap: balance;
+  }
+  .kicker {
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 0 0 0.8rem;
+  }
+  .lede { color: var(--ink-soft); margin: 0 0 2rem; max-width: 38rem; }
+  p { margin: 0 0 1rem; }
+  a { color: var(--gold-strong); }
+
+  /* pillars */
+  .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  .pillar { background: var(--card); padding: 1.4rem 1.3rem; }
+  .pillar h3 { font-size: 1.05rem; font-style: italic; font-weight: 400; margin: 0 0 0.5rem; }
+  .pillar p { font-size: 0.92rem; color: var(--ink-soft); margin: 0; }
+  .pillar .tag {
+    display: block;
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    color: var(--gold);
+    margin-bottom: 0.7rem;
+    text-transform: uppercase;
+  }
+  @media (max-width: 640px) { .pillars { grid-template-columns: 1fr; } }
+
+  /* spec table */
+  .spec-scroll { overflow-x: auto; border: 1px solid var(--line); }
+  table.spec {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.82rem;
+    background: var(--card);
+    min-width: 30rem;
+  }
+  table.spec td {
+    padding: 0.65rem 1rem;
+    border-top: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.spec tr:first-child td { border-top: none; }
+  table.spec td:first-child { color: var(--ink-soft); white-space: nowrap; width: 14rem; }
+  table.spec td:last-child { font-variant-numeric: tabular-nums; }
+
+  /* steps + code */
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 1.6rem 2.6rem;
+  }
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0; top: 0.1rem;
+    width: 1.6rem; height: 1.6rem;
+    border: 1px solid var(--gold);
+    border-radius: 50%;
+    color: var(--gold);
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.8rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  ol.steps h3 { font-size: 1rem; margin: 0 0 0.35rem; font-weight: 700; font-style: normal; }
+  ol.steps p { font-size: 0.95rem; color: var(--ink-soft); margin: 0 0 0.6rem; }
+  pre.code {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    margin: 0;
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+
+  .note {
+    border-left: 3px solid var(--gold);
+    background: var(--card);
+    padding: 0.9rem 1.1rem;
+    font-size: 0.93rem;
+    color: var(--ink-soft);
+    margin: 1.6rem 0 0;
+  }
+  .note strong { color: var(--ink); }
+
+  /* roadmap */
+  .road { margin: 0; padding: 0; list-style: none; border-left: 1px solid var(--line); }
+  .road > li { position: relative; padding: 0 0 1.9rem 1.6rem; }
+  .road > li:last-child { padding-bottom: 0.2rem; }
+  .road > li::before {
+    content: "";
+    position: absolute;
+    left: -5px; top: 0.45rem;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 2px solid var(--ink-soft);
+  }
+  .road > li.done::before { background: var(--leaf); border-color: var(--leaf); }
+  .road > li.next::before { background: var(--gold); border-color: var(--gold); }
+  .road .stage {
+    font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .road li.done .stage { color: var(--leaf); }
+  .road li.next .stage { color: var(--gold); }
+  .road h3 { font-size: 1.05rem; margin: 0.15rem 0 0.35rem; font-style: italic; font-weight: 400; }
+  .road p { font-size: 0.93rem; color: var(--ink-soft); margin: 0; max-width: 36rem; }
+
+  /* whitepaper card */
+  .paper-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    padding: 1.8rem 1.8rem 1.6rem;
+  }
+  .paper-card blockquote {
+    margin: 0 0 1.4rem;
+    padding: 0;
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: 0.98rem;
+  }
+
+  footer {
+    padding: 2.6rem 0 3.4rem;
+    color: var(--ink-soft);
+    font-size: 0.85rem;
+  }
+  footer .mono { font-size: 0.72rem; letter-spacing: 0.1em; color: var(--gold); text-transform: uppercase; }
+  footer p { max-width: 38rem; }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <p class="eyebrow">Summerpoem &middot; SUMP</p>
+    <h1 class="verse">
+      Electronic cash, written<br>
+      to outlast <span class="gold">the quantum age.</span>
+    </h1>
+    <p class="hero-sub">
+      Every deployed blockchain secures its funds with signatures a large quantum
+      computer can forge. Summerpoem is a proof-of-work chain designed after that
+      fact: post-quantum signatures from the genesis block, mining that favors the
+      GPU already in your machine, and a fixed supply of 42,000,000&nbsp;SUMP —
+      divisible into stanzas.
+    </p>
+    <ul class="chips">
+      <li class="chip live">regtest live &middot; tests passing</li>
+      <li class="chip tba">mainnet: TBA</li>
+      <li class="chip">fair launch &middot; 0% premine</li>
+      <li class="chip">ML-DSA-44 &middot; FIPS 204</li>
+    </ul>
+    <div class="cta-row">
+      <a class="btn btn-gold" href="https://claude.ai/code/artifact/4fd2c530-6558-4c8b-8ccc-56cba87b0bf1">Read the whitepaper</a>
+      <a class="btn btn-ghost" href="#mine">How to mine</a>
+      <a class="btn btn-ghost" href="#patches">Upcoming patches</a>
+    </div>
+  </header>
+
+  <div class="horizon" role="presentation"></div>
+
+  <section id="why">
+    <p class="kicker">Why it exists</p>
+    <h2>The quantum problem is a signature problem — so we fixed the signatures.</h2>
+    <p class="lede">
+      Shor's algorithm breaks the elliptic-curve keys behind Bitcoin and Ethereum.
+      It does not break proof-of-work hashing. Summerpoem draws the obvious
+      conclusion and builds the smallest sound system around it.
+    </p>
+    <div class="pillars">
+      <div class="pillar">
+        <span class="tag">Signatures</span>
+        <h3>Post-quantum by construction</h3>
+        <p>Every spend is signed with ML-DSA-44, NIST's primary post-quantum
+        standard. Addresses are SHA3-256 hashes — your public key stays hidden
+        until you spend. A hash-based fallback (SLH-DSA) is specified and dormant,
+        one soft fork away.</p>
+      </div>
+      <div class="pillar">
+        <span class="tag">Mining</span>
+        <h3>Your GPU is the mining rig</h3>
+        <p>SumpHash v1 is memory-hard: a fixed 2&nbsp;GiB dataset and random reads
+        that make DRAM bandwidth the bottleneck — the resource consumer graphics
+        cards deliver best per dollar. The dataset never grows, so a 4&nbsp;GB card
+        stays viable forever.</p>
+      </div>
+      <div class="pillar">
+        <span class="tag">Launch</span>
+        <h3>Fair, and provably so</h3>
+        <p>No premine, no developer allocation, no early access. The genesis
+        subsidy is paid to the all-zero key — unspendable by anyone, founders
+        included. The founding team mines under the same rules as you.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="horizon" role="presentation"></div>
+
+  <section id="specs">
+    <p class="kicker">The chain at a glance</p>
+    <h2>Chosen numbers, and why they hold.</h2>
+    <p class="lede">Every parameter below is implemented and covered by tests in the
+    Rust reference implementation.</p>
+    <div class="spec-scroll">
+      <table class="spec">
+        <tbody>
+        <tr><td>total supply</td><td>42,000,000 SUMP (hard cap, enforced by construction)</td></tr>
+        <tr><td>base unit</td><td>1 stanza = 10&#8315;&#8312; SUMP</td></tr>
+        <tr><td>block interval</td><td>60 s &middot; ASERT per-block difficulty</td></tr>
+        <tr><td>block size</td><td>4 MB (&#8776;16 tx/s at launch; 10&ndash;20&times; more after STARK compression)</td></tr>
+        <tr><td>initial reward</td><td>13.8458 SUMP, smooth geometric decay, half-life &#8776;4 years</td></tr>
+        <tr><td>signatures</td><td>ML-DSA-44 (FIPS 204) &middot; sig 2,420 B &middot; pubkey 1,312 B</td></tr>
+        <tr><td>fallback scheme</td><td>SLH-DSA-128s (FIPS 205), fully specified, dormant</td></tr>
+        <tr><td>proof of work</td><td>SumpHash v1 &middot; SHA3/SHAKE &middot; fixed 2 GiB dataset</td></tr>
+        <tr><td>verification</td><td>64 MiB light cache &middot; any node verifies in milliseconds, no GPU</td></tr>
+        <tr><td>addresses</td><td>bech32m, sump1&hellip; &middot; SHA3-256 of pubkey</td></tr>
+        <tr><td>coinbase maturity</td><td>100 blocks</td></tr>
+        <tr><td>premine</td><td>0%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="horizon" role="presentation"></div>
+
+  <section id="launch">
+    <p class="kicker">Mining launch</p>
+    <h2>When the network opens, everyone starts at block one.</h2>
+    <p class="lede">
+      Mainnet genesis has not been cut — the launch date will be announced here
+      once peer-to-peer networking ships. Here is exactly what launch will look
+      like, committed in advance:
+    </p>
+    <p><strong>Fair launch.</strong> Mining opens for everyone at the same
+    moment. There is no premine and no allocation; the only SUMP that will ever
+    exist is mined, and the genesis reward itself is provably unspendable.</p>
+    <p><strong>A declared beta period.</strong> Following Bitcoin's example, there
+    is no public testnet — the young mainnet is the proving ground, and it is
+    honestly labeled: until permanence is explicitly declared, the chain may be
+    restarted from genesis. Mine accordingly; nothing at stake is hidden from
+    you.</p>
+    <p><strong>ASIC response, pre-committed.</strong> If ASICs for SumpHash ever
+    ship, the algorithm is tweaked at a scheduled hard fork. The credible threat
+    is the deterrent — it kept Monero ASIC-free for years.</p>
+  </section>
+
+  <div class="horizon" role="presentation"></div>
+
+  <section id="mine">
+    <p class="kicker">How to mine</p>
+    <h2>If you can build a Rust project, you can mine a block today.</h2>
+    <p class="lede">
+      Public mining begins at mainnet genesis. Until then, everything is testable
+      on a local regtest chain — the same consensus code mainnet will run.
+    </p>
+    <ol class="steps">
+      <li>
+        <h3>Build the node</h3>
+        <p>One binary — node, wallet, and reference miner. Requires the Rust toolchain.</p>
+        <pre class="code">cargo build --release</pre>
+      </li>
+      <li>
+        <h3>Create a chain and a wallet</h3>
+        <p>Regtest gives you a private network with instant, easy blocks.</p>
+        <pre class="code">sump genesis
+sump wallet new</pre>
+      </li>
+      <li>
+        <h3>Mine to your own address</h3>
+        <p>Block rewards land in your wallet; coinbases mature after a few blocks.</p>
+        <pre class="code">sump miner mine --blocks 6
+sump wallet balance</pre>
+      </li>
+      <li>
+        <h3>Send a payment, mine it in</h3>
+        <p>Transactions wait in the mempool until the next block picks them up —
+        exactly as mainnet will behave.</p>
+        <pre class="code">sump wallet send --to sumprt1q&hellip; --amount 5.5
+sump miner mine --blocks 1</pre>
+      </li>
+    </ol>
+    <div class="note">
+      <strong>Mainnet hardware:</strong> a consumer GPU with at least 4&nbsp;GB of
+      memory once the GPU kernels ship (v0.3); the CPU reference miner works from
+      day one. Running a <em>validating node</em> needs no GPU at all — 64&nbsp;MiB
+      and any CPU verify the chain.
+    </div>
+  </section>
+
+  <div class="horizon" role="presentation"></div>
+
+  <section id="patches">
+    <p class="kicker">Upcoming patches</p>
+    <h2>The road to genesis, in order.</h2>
+    <p class="lede">Each stage gates the next; mainnet launches when the network
+    layer is proven.</p>
+    <ul class="road">
+      <li class="done">
+        <span class="stage">v0.1 &middot; shipped &middot; july 2026</span>
+        <h3>First verse — the consensus core</h3>
+        <p>Full validation, reorgs, SumpHash v1 (light verification &#8801; full
+        mining, tested), ML-DSA-44 wallets, ASERT difficulty, emission schedule,
+        CPU miner, regtest CLI. All tests passing, end-to-end payments working.</p>
+      </li>
+      <li class="next">
+        <span class="stage">v0.2 &middot; next up</span>
+        <h3>The network — P2P with post-quantum transport</h3>
+        <p>Node-to-node gossip, chain sync, and mempool relay over channels
+        encrypted with ML-KEM (FIPS 203) — quantum-resistant signatures deserve
+        quantum-resistant transport. This is the gate to mainnet.</p>
+      </li>
+      <li>
+        <span class="stage">v0.3</span>
+        <h3>GPU miner kernels</h3>
+        <p>OpenCL/CUDA kernels for SumpHash, turning the CPU reference loop into
+        the real DRAM-bandwidth race consumer cards are built to win.</p>
+      </li>
+      <li>
+        <span class="stage">v0.4</span>
+        <h3>SLH-DSA vault addresses</h3>
+        <p>The dormant hash-based output type becomes activatable: opt-in vault
+        addresses for cold storage whose security assumes nothing beyond SHA3
+        itself.</p>
+      </li>
+      <li class="next">
+        <span class="stage">mainnet &middot; date TBA</span>
+        <h3>Genesis — mining launch</h3>
+        <p>Fair launch under a declared beta period. Announced here, with the
+        genesis hash published in advance.</p>
+      </li>
+      <li>
+        <span class="stage">phase 2</span>
+        <h3>STARK witness compression</h3>
+        <p>One hash-based proof per block replaces ~2.4&nbsp;MB of raw signatures,
+        first unlocking witness pruning, then a 10&ndash;20&times; capacity gain —
+        the size cost of post-quantum cryptography, clawed back.</p>
+      </li>
+    </ul>
+  </section>
+
+  <div class="horizon" role="presentation"></div>
+
+  <section id="paper">
+    <p class="kicker">The whitepaper</p>
+    <h2>Ten sections, no hand-waving.</h2>
+    <div class="paper-card">
+      <blockquote>
+        &ldquo;Summerpoem applies a simple observation — that quantum computing
+        breaks blockchain signatures, not blockchain hashing — and builds the
+        smallest sound system around it. &hellip; The result is a chain that needs
+        no quantum migration, because it never made the assumption that quantum
+        computers break.&rdquo;
+      </blockquote>
+      <p style="font-size:0.9rem; color:var(--ink-soft); margin-bottom:1.4rem;">
+        Threat model, transaction format, SumpHash, emission math, the STARK
+        scaling path, and the launch policy — the complete design in one
+        document, with a Rust reference implementation as its executable
+        specification.
+      </p>
+      <a class="btn btn-gold" href="https://claude.ai/code/artifact/4fd2c530-6558-4c8b-8ccc-56cba87b0bf1">Read the whitepaper (draft v0.1)</a>
+    </div>
+  </section>
+
+  <div class="horizon" role="presentation"></div>
+
+  <footer>
+    <p class="mono">Summerpoem &middot; SUMP &middot; every unit a stanza</p>
+    <p>Pre-release software under active development. Nothing on this page is
+    investment advice; SUMP has no monetary value today and the pre-permanence
+    chain may be restarted. Mine because the machine is interesting.</p>
+  </footer>
+</div>

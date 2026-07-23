@@ -1,0 +1,21 @@
+[package]
+name = "sump"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sump"
+path = "src/main.rs"
+
+[dependencies]
+sump-core.workspace = true
+sump-pow.workspace = true
+sump-crypto.workspace = true
+sump-node.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+getrandom.workspace = true
