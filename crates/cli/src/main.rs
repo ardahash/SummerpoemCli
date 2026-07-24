@@ -24,7 +24,7 @@ use wallet::Wallet;
 #[command(name = "sump", version, about = "Summerpoem (SUMP) reference node & tools")]
 struct Cli {
     /// Network: regtest or mainnet
-    #[arg(long, global = true, default_value = "regtest")]
+    #[arg(long, global = true, default_value = "mainnet")]
     network: String,
     /// Data directory holding chain.dat and the mempool
     #[arg(long, global = true, default_value = "./sumpchain")]
