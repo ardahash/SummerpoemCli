@@ -190,24 +190,30 @@ fn parse_sump(s: &str) -> Result<u64> {
 /// Create and persist the genesis block for this network. Genesis is fully
 /// deterministic from the network params, so every node produces the same
 /// genesis hash — this is safe to run lazily on first launch.
-fn init_genesis(params: &Params, dir: &Path) -> Result<sump_core::Hash256> {
+/// Create and persist the genesis block using an already-built PoW context.
+/// Genesis mining needs the fast (full-dataset) path — at the pow limit it
+/// still takes millions of hash attempts, which the light cache cannot do in
+/// reasonable time.
+fn write_genesis(
+    params: &Params,
+    dir: &Path,
+    ctx: &PowContext,
+) -> Result<sump_core::Hash256> {
     std::fs::create_dir_all(mempool_dir(dir))?;
-    if params.network == Network::Mainnet {
-        eprintln!(
-            "first launch: building the epoch-0 dataset ({} MiB) and mining \
-             genesis — this is a one-time step and may take a few minutes...",
-            params.pow.dataset_bytes >> 20
-        );
-    } else {
-        eprintln!("generating epoch-0 PoW dataset...");
-    }
-    let ctx = PowContext::new_full(&params.pow, 0);
-    let block = genesis::build_genesis(params, &ctx);
+    let block = genesis::build_genesis(params, ctx);
     let hash = block.header.hash();
     let state = ChainState::new(params.clone(), block)
         .map_err(|e| anyhow!("genesis failed validation: {e}"))?;
     save_state(&state, dir)?;
     Ok(hash)
+}
+
+fn init_genesis(params: &Params, dir: &Path) -> Result<sump_core::Hash256> {
+    eprintln!("creating genesis block...");
+    // A light context suffices: a hardcoded-nonce genesis is only verified
+    // (not mined), and regtest's easy target resolves in a few light hashes.
+    let ctx = PowContext::new_light(&params.pow, 0);
+    write_genesis(params, dir, &ctx)
 }
 
 fn load_state(params: &Params, dir: &Path) -> Result<ChainState> {
@@ -308,8 +314,9 @@ fn main() -> Result<()> {
                     wallet,
                     gui,
                 } => {
-                    // first launch on this network: create the deterministic
-                    // genesis block automatically so the miner just works
+                    // First launch on this network: create the deterministic
+                    // genesis block automatically (verified from its hardcoded
+                    // nonce — fast) so the miner just works.
                     if !chain_file(&dir).exists() {
                         let hash = init_genesis(&params, &dir)?;
                         println!("genesis: {hash}");

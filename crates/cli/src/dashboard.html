@@ -66,11 +66,12 @@
     <div class="tile"><p class="label">Mining</p><div class="value"><span class="status-dot off" id="minedot"></span><span id="mining">—</span></div><div class="sub" id="rig"></div></div>
     <div class="tile"><p class="label">Hashrate</p><div class="value" id="hashrate">—</div><div class="sub">this session</div></div>
     <div class="tile"><p class="label">Balance</p><div class="value" id="balance">—</div><div class="sub">SUMP (spendable)</div></div>
+    <div class="tile"><p class="label">Pending</p><div class="value" id="pending">—</div><div class="sub" id="pendingsub">maturing rewards</div></div>
     <div class="tile"><p class="label">Peers</p><div class="value" id="peers">—</div><div class="sub" id="known"></div></div>
-    <div class="tile"><p class="label">Mempool</p><div class="value" id="mempool">—</div><div class="sub">pending tx</div></div>
   </div>
 
   <div class="rows">
+    <div class="row"><span class="k">Mempool</span><span class="v" id="mempool">—</span></div>
     <div class="row"><span class="k">Tip</span><span class="v" id="tip">—</span></div>
     <div class="row"><span class="k">Address</span><span class="v" id="address">—</span></div>
     <div class="row"><span class="k">Vault address</span><span class="v" id="vault">—</span></div>
@@ -100,6 +101,8 @@
       document.getElementById("rig").textContent = mining ? (d.gpu ? "GPU (CUDA)" : "CPU") : "";
       document.getElementById("hashrate").textContent = mining ? fmtHashrate(d.hashrate) : "—";
       document.getElementById("balance").textContent = d.balance.toLocaleString(undefined, {maximumFractionDigits: 8});
+      document.getElementById("pending").textContent = d.pending.toLocaleString(undefined, {maximumFractionDigits: 8});
+      document.getElementById("pendingsub").textContent = d.pending > 0 ? "maturing (100 blocks)" : "maturing rewards";
       document.getElementById("peers").textContent = d.peers;
       document.getElementById("known").textContent = d.known_addrs + " known addresses";
       document.getElementById("mempool").textContent = d.mempool;

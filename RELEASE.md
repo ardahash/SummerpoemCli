@@ -29,10 +29,16 @@ dumpbin /dependents target\release\sump.exe
 ```powershell
 $dist = "dist"
 Copy-Item target\release\sump.exe "$dist\sump.exe" -Force
-Compress-Archive -Path "$dist\sump.exe","$dist\QUICKSTART.txt" `
+Compress-Archive -Path "$dist\sump.exe","$dist\Start Mining.bat",`
+  "$dist\Check Balance.bat","$dist\QUICKSTART.txt" `
   -DestinationPath "$dist\summerpoem-v<VERSION>-windows-x64.zip" -Force
 Get-FileHash "$dist\summerpoem-v<VERSION>-windows-x64.zip" -Algorithm SHA256
 ```
+
+The `.bat` launchers give non-technical users a double-click experience
+(`sump.exe` is a CLI — double-clicking it alone just flashes a console).
+They invoke the exe by absolute path (`%~dp0sump.exe`) so they work even
+where the current directory is not on the executable search path.
 
 ## Publish (GitHub Release)
 

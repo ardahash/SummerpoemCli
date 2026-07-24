@@ -692,7 +692,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sump"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "sump-core"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "hex",
  "primitive-types",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "sump-crypto"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "bech32",
  "fips204",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "sump-gpu"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "cudarc",
  "primitive-types",
@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "sump-net"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "chacha20poly1305",
  "fips203",
@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "sump-node"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "primitive-types",
  "sump-core",
@@ -768,7 +768,7 @@ dependencies = [
 
 [[package]]
 name = "sump-pow"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "primitive-types",
  "sump-core",

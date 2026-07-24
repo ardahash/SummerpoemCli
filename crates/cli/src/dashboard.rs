@@ -35,23 +35,29 @@ impl MinerStats {
     }
 }
 
-/// Spendable balance (stanzas) for a precomputed set of owned (scheme, pkh).
-fn balance_for(node: &NetNode, owned: &[(u8, [u8; 20])]) -> u64 {
+/// (spendable, pending) balance in stanzas for a precomputed owned set.
+/// Pending = owned coins not yet spendable (immature coinbase or timelocked).
+fn balances_for(node: &NetNode, owned: &[(u8, [u8; 20])]) -> (u64, u64) {
     let shared = node.shared();
     let chain = shared.chain.lock().unwrap();
     let next_height = chain.height() + 1;
     let maturity = chain.params().coinbase_maturity;
-    chain
-        .utxos()
-        .values()
-        .filter(|u| owned.contains(&(u.output.lock.scheme().id(), *u.output.lock.pkh())))
-        .filter(|u| !u.coinbase || next_height >= u.height + maturity)
-        .filter(|u| match u.output.lock {
+    let (mut spendable, mut total) = (0u64, 0u64);
+    for u in chain.utxos().values() {
+        if !owned.contains(&(u.output.lock.scheme().id(), *u.output.lock.pkh())) {
+            continue;
+        }
+        total += u.output.amount;
+        let mature = !u.coinbase || next_height >= u.height + maturity;
+        let unlocked = match u.output.lock {
             Lock::Timelock { height, .. } => next_height >= height,
             Lock::P2pkh { .. } => true,
-        })
-        .map(|u| u.output.amount)
-        .sum()
+        };
+        if mature && unlocked {
+            spendable += u.output.amount;
+        }
+    }
+    (spendable, total - spendable)
 }
 
 fn json_escape(s: &str) -> String {
@@ -85,7 +91,7 @@ fn status_json(
     let mempool = shared.mempool.lock().unwrap().len().max(mempool);
     let peers = node.peer_count();
     let known = node.known_addr_count();
-    let balance = balance_for(node, owned);
+    let (balance, pending) = balances_for(node, owned);
     let hashes = stats.hashes.load(Ordering::Relaxed);
     let secs = stats.start.elapsed().as_secs_f64().max(1.0);
     let hps = hashes as f64 / secs;
@@ -93,7 +99,7 @@ fn status_json(
     format!(
         "{{\"network\":\"{}\",\"height\":{},\"tip\":\"{}\",\"supply\":{:.8},\
          \"peers\":{},\"known_addrs\":{},\"mempool\":{},\"mining\":{},\
-         \"gpu\":{},\"hashrate\":{:.0},\"balance\":{:.8},\
+         \"gpu\":{},\"hashrate\":{:.0},\"balance\":{:.8},\"pending\":{:.8},\
          \"address\":\"{}\",\"vault\":\"{}\"}}",
         json_escape(network),
         height,
@@ -106,6 +112,7 @@ fn status_json(
         stats.gpu.load(Ordering::Relaxed),
         hps,
         balance as f64 / COIN as f64,
+        pending as f64 / COIN as f64,
         json_escape(address),
         json_escape(vault),
     )

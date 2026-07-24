@@ -8,9 +8,14 @@ use sump_core::params::Params;
 use sump_core::tx::{Lock, SigScheme, Transaction, TxBody, TxOutput};
 use sump_pow::PowContext;
 
-/// Build and mine the genesis block. The genesis coinbase pays the height-0
-/// subsidy to the all-zero key hash — provably out of anyone's control
-/// (fair launch: not even the founders can spend it).
+/// Build the genesis block. The genesis coinbase pays the height-0 subsidy to
+/// the all-zero key hash — provably out of anyone's control (fair launch: not
+/// even the founders can spend it).
+///
+/// If `params.genesis_nonce` is set, that verified nonce is used directly (the
+/// caller's `ChainState::new` then confirms its proof-of-work with one cheap
+/// hash) — no mining, so first launch is fast. Otherwise the block is mined
+/// using `ctx` (regtest, whose easy target resolves in a few hashes).
 pub fn build_genesis(params: &Params, ctx: &PowContext) -> Block {
     let mut coinbase_data = 0u64.to_le_bytes().to_vec();
     coinbase_data.extend_from_slice(params.genesis_message.as_bytes());
@@ -45,9 +50,13 @@ pub fn build_genesis(params: &Params, ctx: &PowContext) -> Block {
     block.header.tx_root = block.compute_tx_root();
     block.header.witness_root = block.compute_witness_root();
 
-    let target = bits_to_target(block.header.bits).expect("valid bits");
-    let msg = block.header.pow_message();
-    let nonce = sump_pow::mine(ctx, &msg, target, 0, u64::MAX).expect("genesis mine");
-    block.header.nonce = nonce;
+    block.header.nonce = match params.genesis_nonce {
+        Some(n) => n,
+        None => {
+            let target = bits_to_target(block.header.bits).expect("valid bits");
+            let msg = block.header.pow_message();
+            sump_pow::mine(ctx, &msg, target, 0, u64::MAX).expect("genesis mine")
+        }
+    };
     block
 }

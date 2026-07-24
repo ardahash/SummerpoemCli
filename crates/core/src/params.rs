@@ -48,6 +48,10 @@ pub struct Params {
     pub pow: PowParams,
     pub genesis_time: u64,
     pub genesis_message: &'static str,
+    /// Known genesis nonce. When set, the genesis block is verified (one cheap
+    /// hash) rather than re-mined, so first launch is fast. `None` means mine
+    /// it (used on regtest, whose easy target is found in a few hashes).
+    pub genesis_nonce: Option<u64>,
     pub address_hrp: &'static str,
     /// Default seed nodes for peer discovery (host:port). Filled in for
     /// mainnet at deployment; empty on regtest.
@@ -72,6 +76,7 @@ impl Params {
             },
             genesis_time: 1_784_851_200, // 2026-07-24T00:00:00Z
             genesis_message: "What if life was meant to be lived",
+            genesis_nonce: Some(11_110_300), // verified; hash 60235b42...1ca0d
             address_hrp: "sump",
             // Set at deployment: public seed node addresses.
             seeds: &[],
@@ -95,6 +100,7 @@ impl Params {
             },
             genesis_time: 1_782_864_000,
             genesis_message: "Summerpoem regtest genesis.",
+            genesis_nonce: None, // easy target — mine it each time
             address_hrp: "sumprt",
             seeds: &[],
         }
