@@ -7,13 +7,13 @@
 use crate::message::{Message, BLOCKS_PER_ROUND, MAX_ADDRS, MAX_INV, PROTOCOL_VERSION};
 use crate::transport;
 use std::collections::{HashMap, HashSet};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sump_core::block::Block;
 use sump_core::hash::Hash256;
 use sump_core::tx::Transaction;
@@ -29,6 +29,14 @@ pub struct PeerHandle {
 /// Target number of outbound connections the discovery dialer maintains.
 const TARGET_PEERS: usize = 8;
 const ADDR_SAMPLE: usize = 200;
+/// DoS limits (Bitcoin-style): cap inbound connections and per-IP connections
+/// to bound resource use; ban an IP once its misbehavior score crosses the
+/// threshold (an invalid block/tx/message scores the full amount → instant
+/// ban), so an attacker cannot cheaply reconnect and re-flood.
+const MAX_INBOUND: usize = 117;
+const MAX_PER_IP: usize = 5;
+const BAN_SCORE: i32 = 100;
+const BAN_DURATION: Duration = Duration::from_secs(24 * 3600);
 
 pub struct Shared {
     pub network_id: u8,
@@ -44,6 +52,51 @@ pub struct Shared {
     book: Mutex<HashSet<SocketAddr>>,
     /// Addresses we are currently connected to or dialing (dedup dials).
     connected: Mutex<HashSet<SocketAddr>>,
+    /// Live inbound connection counts per source IP.
+    inbound: Mutex<HashMap<IpAddr, usize>>,
+    /// Misbehavior score per IP; crossing BAN_SCORE bans the IP.
+    scores: Mutex<HashMap<IpAddr, i32>>,
+    /// Banned IPs and the time their ban expires.
+    banned: Mutex<HashMap<IpAddr, Instant>>,
+}
+
+fn is_banned(shared: &Shared, ip: IpAddr) -> bool {
+    let mut banned = shared.banned.lock().unwrap();
+    match banned.get(&ip) {
+        Some(&until) if Instant::now() < until => true,
+        Some(_) => {
+            banned.remove(&ip);
+            false
+        }
+        None => false,
+    }
+}
+
+/// Record misbehavior for `ip`; ban it once the score crosses the threshold.
+fn misbehave(shared: &Shared, ip: IpAddr, points: i32) {
+    let mut scores = shared.scores.lock().unwrap();
+    let s = scores.entry(ip).or_insert(0);
+    *s += points;
+    if *s >= BAN_SCORE {
+        scores.remove(&ip);
+        drop(scores);
+        shared
+            .banned
+            .lock()
+            .unwrap()
+            .insert(ip, Instant::now() + BAN_DURATION);
+        log(shared, &format!("\x1b[31mbanned {ip}\x1b[0m (misbehavior)"));
+    }
+}
+
+fn dec_inbound(shared: &Shared, ip: IpAddr) {
+    let mut inbound = shared.inbound.lock().unwrap();
+    if let Some(c) = inbound.get_mut(&ip) {
+        *c = c.saturating_sub(1);
+        if *c == 0 {
+            inbound.remove(&ip);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -53,7 +106,8 @@ pub struct NetNode {
 
 fn log(shared: &Shared, msg: &str) {
     if !shared.quiet {
-        eprintln!("[net] {msg}");
+        // dim gold [net] prefix; the message may carry its own color codes
+        eprintln!("\x1b[2;33m[net]\x1b[0m {msg}");
     }
 }
 
@@ -72,6 +126,9 @@ impl NetNode {
                 listen_port: AtomicU16::new(0),
                 book: Mutex::new(HashSet::new()),
                 connected: Mutex::new(HashSet::new()),
+                inbound: Mutex::new(HashMap::new()),
+                scores: Mutex::new(HashMap::new()),
+                banned: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -105,15 +162,33 @@ impl NetNode {
         thread::spawn(move || {
             for conn in listener.incoming() {
                 let Ok(stream) = conn else { continue };
+                let peer_addr = stream
+                    .peer_addr()
+                    .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+                let ip = peer_addr.ip();
+
+                // DoS gate: drop banned IPs and enforce inbound / per-IP caps
+                // before spending a handshake on the connection.
+                if is_banned(&shared, ip) {
+                    continue;
+                }
+                {
+                    let mut inbound = shared.inbound.lock().unwrap();
+                    let total: usize = inbound.values().sum();
+                    let per_ip = *inbound.get(&ip).unwrap_or(&0);
+                    if total >= MAX_INBOUND || per_ip >= MAX_PER_IP {
+                        continue; // silently drop; the socket closes
+                    }
+                    *inbound.entry(ip).or_insert(0) += 1;
+                }
+
                 let shared = shared.clone();
                 thread::spawn(move || {
-                    let peer_addr = stream
-                        .peer_addr()
-                        .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
                     match transport::respond(stream, shared.network_id) {
-                        Ok((r, w)) => run_peer(shared, r, w, peer_addr, false),
+                        Ok((r, w)) => run_peer(shared.clone(), r, w, peer_addr, false),
                         Err(e) => log(&shared, &format!("handshake with {peer_addr} failed: {e}")),
                     }
+                    dec_inbound(&shared, ip);
                 });
             }
         });
@@ -228,7 +303,7 @@ fn accept_block(
             log(
                 shared,
                 &format!(
-                    "new tip height {} {} ({} txs)",
+                    "\x1b[32m✓ new tip height {}\x1b[0m {} ({} txs)",
                     chain.height(),
                     hash,
                     block.transactions.len()
@@ -261,6 +336,9 @@ fn broadcast(shared: &Arc<Shared>, msg: &Message, except: Option<u64>) {
 
 /// Dial an outbound peer, deduplicating against in-flight/established dials.
 fn dial(shared: &Arc<Shared>, target: SocketAddr) {
+    if is_banned(shared, target.ip()) {
+        return;
+    }
     {
         let mut connected = shared.connected.lock().unwrap();
         if !connected.insert(target) {
@@ -348,12 +426,16 @@ fn run_peer(
         let msg = match Message::decode(&frame) {
             Ok(m) => m,
             Err(e) => {
+                // an undecodable message is a protocol violation → ban
                 log(&shared, &format!("peer #{id} sent bad message: {e}"));
+                misbehave(&shared, addr.ip(), BAN_SCORE);
                 break;
             }
         };
         if let Err(e) = handle_message(&shared, id, msg, &tx, &mut peer_state) {
+            // invalid consensus data (bad block/tx, oversized request) → ban
             log(&shared, &format!("peer #{id} error: {e}"));
+            misbehave(&shared, addr.ip(), BAN_SCORE);
             break;
         }
     }
@@ -541,7 +623,13 @@ fn handle_message(
                         Some(peer_id),
                     );
                 }
-                Err(MempoolError::Duplicate) | Err(MempoolError::Conflict) => {}
+                // benign: already have it, conflicts, underpriced, or pool
+                // full — drop without penalizing the peer
+                Err(MempoolError::Duplicate)
+                | Err(MempoolError::Conflict)
+                | Err(MempoolError::LowFee { .. })
+                | Err(MempoolError::Full) => {}
+                // relaying a consensus-invalid tx is misbehavior → ban
                 Err(MempoolError::Invalid(e)) => {
                     return Err(format!("invalid tx relayed: {e}"));
                 }

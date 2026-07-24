@@ -24,11 +24,11 @@ impl Rig {
         }
         match GpuMiner::new(ctx) {
             Ok(g) => {
-                eprintln!("[miner] GPU: {}", g.device_name());
+                eprintln!("\x1b[36m[miner]\x1b[0m \x1b[32mGPU:\x1b[0m {}", g.device_name());
                 Rig::Gpu(g)
             }
             Err(e) => {
-                eprintln!("[miner] GPU unavailable ({e}); using CPU");
+                eprintln!("\x1b[36m[miner]\x1b[0m \x1b[33mGPU unavailable\x1b[0m ({e}); using CPU");
                 Rig::Cpu
             }
         }

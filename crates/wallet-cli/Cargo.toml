@@ -1,0 +1,18 @@
+[package]
+name = "sump-wallet-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sump-wallet"
+path = "src/main.rs"
+
+[dependencies]
+sump-core.workspace = true
+sump-crypto.workspace = true
+sump-wallet.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+hex.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "sump-wallet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "sump_wallet"
+path = "src/lib.rs"
+
+[dependencies]
+sump-core.workspace = true
+sump-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+getrandom.workspace = true
+thiserror.workspace = true

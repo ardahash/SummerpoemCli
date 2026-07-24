@@ -7,11 +7,13 @@ members = [
     "crates/node",
     "crates/net",
     "crates/gpu",
+    "crates/wallet",
     "crates/cli",
+    "crates/wallet-cli",
 ]
 
 [workspace.package]
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 license = "MIT"
 
@@ -22,6 +24,7 @@ sump-crypto = { path = "crates/crypto" }
 sump-node = { path = "crates/node" }
 sump-net = { path = "crates/net" }
 sump-gpu = { path = "crates/gpu" }
+sump-wallet = { path = "crates/wallet" }
 
 sha3 = "0.10"
 fips203 = "0.4"

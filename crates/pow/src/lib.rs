@@ -132,13 +132,26 @@ impl PowContext {
         out
     }
 
-    /// Materialize the full dataset (miners only).
+    /// Materialize the full dataset (miners only). Prints a progress line to
+    /// stderr for large (mainnet-scale) datasets so the one-time build is not
+    /// a silent wait; stays quiet for small (regtest/test) datasets.
     pub fn gen_dataset(&mut self) {
         let items = self.params.dataset_bytes / ITEM;
+        let verbose = self.params.dataset_bytes >= 64 << 20;
+        let step = (items / 100).max(1);
         let mut ds = vec![0u8; items * ITEM];
         for i in 0..items {
             let item = self.dataset_item(i as u64);
             ds[i * ITEM..(i + 1) * ITEM].copy_from_slice(&item);
+            if verbose && i % step == 0 {
+                eprint!(
+                    "\r  preparing mining dataset: {:>3}%  ",
+                    i * 100 / items.max(1)
+                );
+            }
+        }
+        if verbose {
+            eprintln!("\r  preparing mining dataset: 100%  ");
         }
         self.dataset = Some(ds);
     }

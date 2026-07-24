@@ -64,8 +64,9 @@ enum NodeCmd {
     Submit { tx_file: PathBuf },
     /// Run a networked node (P2P over ML-KEM encrypted transport)
     Run {
-        /// Address to listen on for peers
-        #[arg(long, default_value = "127.0.0.1:8776")]
+        /// Address to listen on for peers (0.0.0.0 = reachable by other
+        /// machines; use 127.0.0.1 to stay local-only)
+        #[arg(long, default_value = "0.0.0.0:8776")]
         listen: String,
         /// Peer address(es) to connect to (repeatable)
         #[arg(long)]
@@ -82,6 +83,10 @@ enum NodeCmd {
         /// Serve a local web dashboard (GUI) at this address
         #[arg(long, num_args = 0..=1, default_missing_value = "127.0.0.1:8787")]
         gui: Option<String>,
+        /// Expose the wallet RPC (for standalone wallets) at this address.
+        /// Use 0.0.0.0:PORT to let other machines' wallets connect.
+        #[arg(long, num_args = 0..=1, default_missing_value = "127.0.0.1:8788")]
+        rpc: Option<String>,
     },
 }
 
@@ -270,7 +275,29 @@ fn load_mempool(dir: &Path) -> Result<Vec<(PathBuf, Transaction)>> {
     Ok(out)
 }
 
+/// Enable ANSI color escape processing on the Windows console so colored log
+/// output renders in cmd.exe/conhost as well as Windows Terminal.
+#[cfg(windows)]
+fn enable_ansi() {
+    use windows_sys::Win32::System::Console::{
+        GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+        STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    unsafe {
+        for h in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            let handle = GetStdHandle(h);
+            let mut mode = 0u32;
+            if GetConsoleMode(handle, &mut mode) != 0 {
+                SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+            }
+        }
+    }
+}
+#[cfg(not(windows))]
+fn enable_ansi() {}
+
 fn main() -> Result<()> {
+    enable_ansi();
     let cli = Cli::parse();
     let network = parse_network(&cli.network)?;
     let params = Params::for_network(network);
@@ -313,6 +340,7 @@ fn main() -> Result<()> {
                     gpu,
                     wallet,
                     gui,
+                    rpc,
                 } => {
                     // First launch on this network: create the deterministic
                     // genesis block automatically (verified from its hardcoded
@@ -360,7 +388,7 @@ fn main() -> Result<()> {
 
                     let stats = dashboard::MinerStats::new();
 
-                    // dashboard GUI server
+                    // dashboard GUI server (also serves the wallet RPC)
                     if let Some(gui_addr) = &gui {
                         let w = wallet_obj.as_ref().unwrap();
                         let owned: Vec<(u8, [u8; 20])> = w
@@ -368,17 +396,24 @@ fn main() -> Result<()> {
                             .iter()
                             .map(|k| (k.scheme.id(), k.pubkey_hash()))
                             .collect();
-                        match dashboard::serve(
-                            gui_addr,
-                            node.clone(),
-                            stats.clone(),
+                        let ctx = dashboard::DashboardCtx {
+                            stats: stats.clone(),
                             owned,
-                            w.address(&params, 0),
-                            w.vault_address(&params, 0),
-                            format!("{:?}", params.network),
-                        ) {
+                            address: wallet::address(w, &params, 0),
+                            vault: wallet::vault_address(w, &params, 0),
+                            network: format!("{:?}", params.network),
+                        };
+                        match dashboard::serve(gui_addr, node.clone(), Some(ctx)) {
                             Ok(addr) => println!("dashboard: http://{addr}"),
                             Err(e) => eprintln!("could not start dashboard: {e}"),
+                        }
+                    }
+
+                    // wallet RPC server (API only; for standalone wallets)
+                    if let Some(rpc_addr) = &rpc {
+                        match dashboard::serve(rpc_addr, node.clone(), None) {
+                            Ok(addr) => println!("wallet RPC: http://{addr} (POST /api/utxos, /api/submit)"),
+                            Err(e) => eprintln!("could not start RPC: {e}"),
                         }
                     }
 
@@ -417,7 +452,7 @@ fn main() -> Result<()> {
                                 let epoch =
                                     epoch_of_height(height, miner_params.pow.epoch_length);
                                 if epoch != ctx_epoch {
-                                    eprintln!("[miner] generating dataset for epoch {epoch}...");
+                                    eprintln!("\x1b[36m[miner]\x1b[0m preparing to mine epoch {epoch}");
                                     let c = PowContext::new_full(&miner_params.pow, epoch);
                                     let selected = Rig::select(&c, gpu);
                                     miner_stats.gpu.store(selected.is_gpu(), Ordering::Relaxed);
@@ -490,21 +525,21 @@ fn main() -> Result<()> {
             WalletCmd::New { wallet } => {
                 let w = Wallet::create(&wallet, &cli.network)?;
                 println!("wallet created: {}", wallet.display());
-                println!("address:       {}", w.address(&params, 0));
-                println!("vault address: {}", w.vault_address(&params, 0));
+                println!("address:       {}", wallet::address(&w, &params, 0));
+                println!("vault address: {}", wallet::vault_address(&w, &params, 0));
             }
             WalletCmd::Address { wallet } => {
                 let w = Wallet::load(&wallet)?;
-                println!("{}", w.address(&params, 0));
+                println!("{}", wallet::address(&w, &params, 0));
             }
             WalletCmd::VaultAddress { wallet } => {
                 let w = Wallet::load(&wallet)?;
-                println!("{}", w.vault_address(&params, 0));
+                println!("{}", wallet::vault_address(&w, &params, 0));
             }
             WalletCmd::Balance { wallet } => {
                 let w = Wallet::load(&wallet)?;
                 let state = load_state(&params, &dir)?;
-                println!("{} SUMP", format_sump(w.balance(&state)));
+                println!("{} SUMP", format_sump(wallet::balance(&w, &state)));
             }
             WalletCmd::Send {
                 wallet,
@@ -519,7 +554,7 @@ fn main() -> Result<()> {
                 let scheme = address::scheme_for_version(version)
                     .ok_or_else(|| anyhow!("unsupported address version {version}"))?;
                 let amount = parse_sump(&amount)?;
-                let tx = w.build_send(&state, scheme, pkh, amount, fee)?;
+                let tx = wallet::send(&w, &state, scheme, pkh, amount, fee)?;
                 state
                     .validate_standalone_tx(&tx)
                     .map_err(|e| anyhow!("built tx failed validation: {e}"))?;

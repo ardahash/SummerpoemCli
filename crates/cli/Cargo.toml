@@ -15,9 +15,13 @@ sump-crypto.workspace = true
 sump-node.workspace = true
 sump-net.workspace = true
 sump-gpu.workspace = true
+sump-wallet.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }

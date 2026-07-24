@@ -330,3 +330,25 @@ fn mempool_drops_conflicting_tx_after_block() {
     pool.update_for_block(&h.state, &block);
     assert_eq!(pool.len(), 0, "conflicting mempool tx evicted");
 }
+
+#[test]
+fn mempool_rejects_underpriced_tx() {
+    // a transaction paying below the minimum relay fee is rejected, so free
+    // transactions cannot flood the pool
+    let mut h = H::new();
+    for _ in 0..6 {
+        h.mine(&[]);
+    }
+    let mut pool = Mempool::new();
+    // fee of 1 stanza is far below the size-based minimum (~4 KB tx)
+    let cheap = h.spend(1, ml_key(2).pubkey_hash(), sump_core::emission::COIN, 1);
+    assert!(matches!(
+        pool.insert(&h.state, cheap),
+        Err(sump_node::mempool::MempoolError::LowFee { .. })
+    ));
+    assert_eq!(pool.len(), 0);
+    // a properly-paying transaction is admitted
+    let ok = h.spend(1, ml_key(2).pubkey_hash(), sump_core::emission::COIN, 100_000);
+    assert!(pool.insert(&h.state, ok).is_ok());
+    assert_eq!(pool.len(), 1);
+}

@@ -8,12 +8,23 @@ use sump_core::hash::Hash256;
 use sump_core::tx::{OutPoint, Transaction};
 use thiserror::Error;
 
+/// Anti-flood limits: a transaction must pay at least 1 stanza per byte
+/// (floored), and the pool is capped by total size — free/underpriced
+/// transactions cannot exhaust a node's memory.
+pub const MIN_RELAY_FEE: u64 = 1_000;
+pub const MIN_FEE_PER_BYTE: u64 = 1;
+pub const MAX_MEMPOOL_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Error)]
 pub enum MempoolError {
     #[error("transaction already in mempool")]
     Duplicate,
     #[error("transaction conflicts with a mempool transaction")]
     Conflict,
+    #[error("fee too low (need at least {need} stanzas)")]
+    LowFee { need: u64 },
+    #[error("mempool is full")]
+    Full,
     #[error("invalid transaction: {0}")]
     Invalid(#[from] ValidationError),
 }
@@ -23,6 +34,8 @@ pub struct Mempool {
     txs: HashMap<Hash256, Transaction>,
     /// outpoint -> txid of the mempool tx spending it
     spends: HashMap<OutPoint, Hash256>,
+    /// running total of encoded transaction sizes
+    bytes: usize,
 }
 
 impl Mempool {
@@ -61,16 +74,28 @@ impl Mempool {
                 return Err(MempoolError::Conflict);
             }
         }
+        let size = tx.size();
+        // anti-flood: enforce a minimum fee before the (cheap) structural
+        // checks pass but validation still runs to confirm the fee
         let fee = chain.validate_standalone_tx(&tx)?;
+        let need = MIN_RELAY_FEE.max(size as u64 * MIN_FEE_PER_BYTE);
+        if fee < need {
+            return Err(MempoolError::LowFee { need });
+        }
+        if self.bytes + size > MAX_MEMPOOL_BYTES {
+            return Err(MempoolError::Full);
+        }
         for input in &tx.body.inputs {
             self.spends.insert(input.prevout, txid);
         }
+        self.bytes += size;
         self.txs.insert(txid, tx);
         Ok(fee)
     }
 
     fn remove(&mut self, txid: &Hash256) {
         if let Some(tx) = self.txs.remove(txid) {
+            self.bytes = self.bytes.saturating_sub(tx.size());
             for input in &tx.body.inputs {
                 self.spends.remove(&input.prevout);
             }
