@@ -1,7 +1,11 @@
 //! `sump` — Summerpoem reference CLI: genesis builder, chain inspection,
 //! wallet, and CPU reference miner.
 
+mod dashboard;
+mod mining;
 mod wallet;
+
+use mining::Rig;
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -43,7 +47,7 @@ enum Command {
         #[command(subcommand)]
         cmd: WalletCmd,
     },
-    /// CPU reference miner
+    /// Standalone miner (GPU or CPU)
     Miner {
         #[command(subcommand)]
         cmd: MinerCmd,
@@ -58,6 +62,27 @@ enum NodeCmd {
     Validate,
     /// Validate a transaction file and place it in the mempool
     Submit { tx_file: PathBuf },
+    /// Run a networked node (P2P over ML-KEM encrypted transport)
+    Run {
+        /// Address to listen on for peers
+        #[arg(long, default_value = "127.0.0.1:8776")]
+        listen: String,
+        /// Peer address(es) to connect to (repeatable)
+        #[arg(long)]
+        connect: Vec<String>,
+        /// Also mine blocks while running
+        #[arg(long)]
+        mine: bool,
+        /// Use the GPU (CUDA) miner, falling back to CPU if unavailable
+        #[arg(long)]
+        gpu: bool,
+        /// Wallet receiving block rewards when --mine is set
+        #[arg(long, default_value = "wallet.json")]
+        wallet: PathBuf,
+        /// Serve a local web dashboard (GUI) at this address
+        #[arg(long, num_args = 0..=1, default_missing_value = "127.0.0.1:8787")]
+        gui: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -67,8 +92,13 @@ enum WalletCmd {
         #[arg(long, default_value = "wallet.json")]
         wallet: PathBuf,
     },
-    /// Show the wallet's receiving address (index 0)
+    /// Show the wallet's everyday receiving address (ML-DSA, index 0)
     Address {
+        #[arg(long, default_value = "wallet.json")]
+        wallet: PathBuf,
+    },
+    /// Show the wallet's vault address (SLH-DSA, hash-based cold storage)
+    VaultAddress {
         #[arg(long, default_value = "wallet.json")]
         wallet: PathBuf,
     },
@@ -101,6 +131,9 @@ enum MinerCmd {
         wallet: PathBuf,
         #[arg(long, default_value_t = 1)]
         blocks: u64,
+        /// Use the GPU (CUDA) miner, falling back to CPU if unavailable
+        #[arg(long)]
+        gpu: bool,
     },
 }
 
@@ -152,6 +185,29 @@ fn parse_sump(s: &str) -> Result<u64> {
         .checked_mul(COIN)
         .and_then(|w| w.checked_add(frac_val))
         .ok_or_else(|| anyhow!("amount overflow"))
+}
+
+/// Create and persist the genesis block for this network. Genesis is fully
+/// deterministic from the network params, so every node produces the same
+/// genesis hash — this is safe to run lazily on first launch.
+fn init_genesis(params: &Params, dir: &Path) -> Result<sump_core::Hash256> {
+    std::fs::create_dir_all(mempool_dir(dir))?;
+    if params.network == Network::Mainnet {
+        eprintln!(
+            "first launch: building the epoch-0 dataset ({} MiB) and mining \
+             genesis — this is a one-time step and may take a few minutes...",
+            params.pow.dataset_bytes >> 20
+        );
+    } else {
+        eprintln!("generating epoch-0 PoW dataset...");
+    }
+    let ctx = PowContext::new_full(&params.pow, 0);
+    let block = genesis::build_genesis(params, &ctx);
+    let hash = block.header.hash();
+    let state = ChainState::new(params.clone(), block)
+        .map_err(|e| anyhow!("genesis failed validation: {e}"))?;
+    save_state(&state, dir)?;
+    Ok(hash)
 }
 
 fn load_state(params: &Params, dir: &Path) -> Result<ChainState> {
@@ -220,22 +276,7 @@ fn main() -> Result<()> {
             if path.exists() {
                 bail!("chain already exists at {}", path.display());
             }
-            std::fs::create_dir_all(mempool_dir(&dir))?;
-            if network == Network::Mainnet {
-                eprintln!(
-                    "note: building the mainnet dataset ({} MiB cache) and mining genesis \
-                     on CPU may take a long time",
-                    params.pow.cache_bytes >> 20
-                );
-            }
-            eprintln!("generating epoch-0 PoW dataset...");
-            let ctx = PowContext::new_full(&params.pow, 0);
-            eprintln!("mining genesis block...");
-            let block = genesis::build_genesis(&params, &ctx);
-            let hash = block.header.hash();
-            let state = ChainState::new(params.clone(), block)
-                .map_err(|e| anyhow!("genesis failed validation: {e}"))?;
-            save_state(&state, &dir)?;
+            let hash = init_genesis(&params, &dir)?;
             println!("genesis created: {hash}");
             println!("chain dir: {}", dir.display());
         }
@@ -259,6 +300,167 @@ fn main() -> Result<()> {
                         state.tip_hash()
                     );
                 }
+                NodeCmd::Run {
+                    listen,
+                    connect,
+                    mine,
+                    gpu,
+                    wallet,
+                    gui,
+                } => {
+                    // first launch on this network: create the deterministic
+                    // genesis block automatically so the miner just works
+                    if !chain_file(&dir).exists() {
+                        let hash = init_genesis(&params, &dir)?;
+                        println!("genesis: {hash}");
+                    }
+                    let state = load_state(&params, &dir)?;
+                    // load the wallet if we mine or serve a GUI (for payout/balance)
+                    let wallet_obj = if mine || gui.is_some() {
+                        Some(Wallet::load(&wallet)?)
+                    } else {
+                        None
+                    };
+                    let payout = if mine {
+                        Some(
+                            wallet_obj
+                                .as_ref()
+                                .unwrap()
+                                .key(sump_core::tx::SigScheme::MlDsa, 0)
+                                .pubkey_hash(),
+                        )
+                    } else {
+                        None
+                    };
+                    let node = sump_net::NetNode::new(state, Some(chain_file(&dir)), false);
+                    let bound = node.listen(&listen)?;
+                    println!("listening on {bound} (network {:?})", params.network);
+                    for peer in &connect {
+                        match node.connect(peer) {
+                            Ok(()) => println!("connecting to {peer}..."),
+                            Err(e) => eprintln!("cannot connect to {peer}: {e}"),
+                        }
+                    }
+                    // peer discovery: seed the address book (explicit peers +
+                    // network seed nodes) and maintain outbound connections
+                    let mut seeds: Vec<String> =
+                        params.seeds.iter().map(|s| s.to_string()).collect();
+                    seeds.extend(connect.iter().cloned());
+                    node.start_discovery(&seeds);
+                    if !params.seeds.is_empty() {
+                        println!("discovery: {} seed node(s)", params.seeds.len());
+                    }
+
+                    let stats = dashboard::MinerStats::new();
+
+                    // dashboard GUI server
+                    if let Some(gui_addr) = &gui {
+                        let w = wallet_obj.as_ref().unwrap();
+                        let owned: Vec<(u8, [u8; 20])> = w
+                            .keys()
+                            .iter()
+                            .map(|k| (k.scheme.id(), k.pubkey_hash()))
+                            .collect();
+                        match dashboard::serve(
+                            gui_addr,
+                            node.clone(),
+                            stats.clone(),
+                            owned,
+                            w.address(&params, 0),
+                            w.vault_address(&params, 0),
+                            format!("{:?}", params.network),
+                        ) {
+                            Ok(addr) => println!("dashboard: http://{addr}"),
+                            Err(e) => eprintln!("could not start dashboard: {e}"),
+                        }
+                    }
+
+                    if let Some(payout) = payout {
+                        let miner_node = node.clone();
+                        let miner_params = params.clone();
+                        let miner_stats = stats.clone();
+                        miner_stats
+                            .mining
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        miner_stats
+                            .gpu
+                            .store(gpu, std::sync::atomic::Ordering::Relaxed);
+                        std::thread::spawn(move || {
+                            use std::sync::atomic::Ordering;
+                            let mut ctx_epoch = u64::MAX;
+                            let mut ctx: Option<PowContext> = None;
+                            let mut rig: Option<Rig> = None;
+                            // GPU launches hash a whole chunk before returning;
+                            // keep it small enough that the template refreshes
+                            // often for new transactions.
+                            let gpu_chunk = 1_048_576u32;
+                            loop {
+                                let (mut template, height) = {
+                                    let shared = miner_node.shared();
+                                    let chain = shared.chain.lock().unwrap();
+                                    let txs = shared.mempool.lock().unwrap().transactions();
+                                    let height = chain.height() + 1;
+                                    (
+                                        sump_node::miner::build_block_template(
+                                            &chain, &txs, payout, now(),
+                                        ),
+                                        height,
+                                    )
+                                };
+                                let epoch =
+                                    epoch_of_height(height, miner_params.pow.epoch_length);
+                                if epoch != ctx_epoch {
+                                    eprintln!("[miner] generating dataset for epoch {epoch}...");
+                                    let c = PowContext::new_full(&miner_params.pow, epoch);
+                                    let selected = Rig::select(&c, gpu);
+                                    miner_stats.gpu.store(selected.is_gpu(), Ordering::Relaxed);
+                                    rig = Some(selected);
+                                    ctx = Some(c);
+                                    ctx_epoch = epoch;
+                                }
+                                // one bounded attempt, then loop to refresh the
+                                // template against new txs / a new tip
+                                let found = rig.as_ref().unwrap().try_mine(
+                                    ctx.as_ref().unwrap(),
+                                    &mut template,
+                                    gpu_chunk,
+                                );
+                                miner_stats.add_hashes(gpu_chunk as u64);
+                                if found {
+                                    match miner_node.submit_block(template) {
+                                        Ok(true) => {}
+                                        Ok(false) => {}
+                                        Err(e) => eprintln!("[miner] block rejected: {e}"),
+                                    }
+                                }
+                            }
+                        });
+                        println!("mining enabled ({})", if gpu { "GPU requested" } else { "CPU" });
+                    }
+
+                    // main loop: bridge wallet tx files from the mempool dir
+                    let mp = mempool_dir(&dir);
+                    std::fs::create_dir_all(&mp)?;
+                    println!("watching {} for transactions; ctrl-c to stop", mp.display());
+                    loop {
+                        for (path, tx) in load_mempool(&dir)? {
+                            match node.submit_tx(tx) {
+                                Ok(_) => {
+                                    let _ = std::fs::remove_file(&path);
+                                    println!("accepted tx from {}", path.display());
+                                }
+                                Err(sump_node::MempoolError::Duplicate) => {
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                                Err(sump_node::MempoolError::Conflict) => {}
+                                Err(sump_node::MempoolError::Invalid(_)) => {
+                                    // likely not yet valid (immature); retry later
+                                }
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                    }
+                }
                 NodeCmd::Submit { tx_file } => {
                     let state = load_state(&params, &dir)?;
                     let raw = std::fs::read_to_string(&tx_file)?;
@@ -281,11 +483,16 @@ fn main() -> Result<()> {
             WalletCmd::New { wallet } => {
                 let w = Wallet::create(&wallet, &cli.network)?;
                 println!("wallet created: {}", wallet.display());
-                println!("address: {}", w.address(&params, 0));
+                println!("address:       {}", w.address(&params, 0));
+                println!("vault address: {}", w.vault_address(&params, 0));
             }
             WalletCmd::Address { wallet } => {
                 let w = Wallet::load(&wallet)?;
                 println!("{}", w.address(&params, 0));
+            }
+            WalletCmd::VaultAddress { wallet } => {
+                let w = Wallet::load(&wallet)?;
+                println!("{}", w.vault_address(&params, 0));
             }
             WalletCmd::Balance { wallet } => {
                 let w = Wallet::load(&wallet)?;
@@ -302,11 +509,10 @@ fn main() -> Result<()> {
                 let state = load_state(&params, &dir)?;
                 let (version, pkh) = address::decode(params.address_hrp, &to)
                     .ok_or_else(|| anyhow!("invalid address for this network"))?;
-                if version != address::VERSION_MLDSA {
-                    bail!("unsupported address version {version}");
-                }
+                let scheme = address::scheme_for_version(version)
+                    .ok_or_else(|| anyhow!("unsupported address version {version}"))?;
                 let amount = parse_sump(&amount)?;
-                let tx = w.build_send(&state, pkh, amount, fee)?;
+                let tx = w.build_send(&state, scheme, pkh, amount, fee)?;
                 state
                     .validate_standalone_tx(&tx)
                     .map_err(|e| anyhow!("built tx failed validation: {e}"))?;
@@ -320,31 +526,37 @@ fn main() -> Result<()> {
         },
 
         Command::Miner { cmd } => match cmd {
-            MinerCmd::Mine { wallet, blocks } => {
+            MinerCmd::Mine {
+                wallet,
+                blocks,
+                gpu,
+            } => {
                 let w = Wallet::load(&wallet)?;
                 let mut state = load_state(&params, &dir)?;
-                let payout = w.key(0).pubkey_hash();
+                let payout = w.key(sump_core::tx::SigScheme::MlDsa, 0).pubkey_hash();
                 let mut ctx_epoch = u64::MAX;
                 let mut ctx: Option<PowContext> = None;
+                let mut rig: Option<Rig> = None;
                 for _ in 0..blocks {
                     let height = state.height() + 1;
                     let epoch = epoch_of_height(height, params.pow.epoch_length);
                     if epoch != ctx_epoch {
                         eprintln!("generating PoW dataset for epoch {epoch}...");
-                        ctx = Some(PowContext::new_full(&params.pow, epoch));
+                        let c = PowContext::new_full(&params.pow, epoch);
+                        rig = Some(Rig::select(&c, gpu));
+                        ctx = Some(c);
                         ctx_epoch = epoch;
                     }
                     let mempool = load_mempool(&dir)?;
                     let txs: Vec<Transaction> =
                         mempool.iter().map(|(_, t)| t.clone()).collect();
-                    let block = miner::mine_and_connect(
-                        &mut state,
-                        ctx.as_ref().unwrap(),
-                        &txs,
-                        payout,
-                        now(),
-                    )
-                    .map_err(|e| anyhow!("mined block rejected: {e}"))?;
+                    let ctx_ref = ctx.as_ref().unwrap();
+                    let mut block =
+                        miner::build_block_template(&state, &txs, payout, now());
+                    rig.as_ref().unwrap().mine(ctx_ref, &mut block);
+                    state
+                        .add_block(block.clone())
+                        .map_err(|e| anyhow!("mined block rejected: {e}"))?;
                     // clear included txs from the mempool
                     let included: Vec<_> =
                         block.transactions[1..].iter().map(|t| t.txid()).collect();

@@ -147,6 +147,20 @@ impl PowContext {
         self.dataset.is_some()
     }
 
+    /// The full materialized dataset (miners only), for uploading to a GPU.
+    pub fn dataset_bytes(&self) -> Option<&[u8]> {
+        self.dataset.as_deref()
+    }
+
+    /// Number of 128-byte pages in the dataset.
+    pub fn pages(&self) -> usize {
+        self.dataset_pages()
+    }
+
+    pub fn accesses(&self) -> usize {
+        self.params.accesses
+    }
+
     fn page(&self, idx: usize, buf: &mut [u8; PAGE]) {
         if let Some(ds) = &self.dataset {
             buf.copy_from_slice(&ds[idx * PAGE..(idx + 1) * PAGE]);

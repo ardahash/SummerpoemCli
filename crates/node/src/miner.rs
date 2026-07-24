@@ -5,7 +5,7 @@ use crate::error::ValidationError;
 use sump_core::block::{Block, BlockHeader};
 use sump_core::compact::bits_to_target;
 use sump_core::emission::block_reward;
-use sump_core::tx::{Lock, Transaction, TxBody, TxOutput};
+use sump_core::tx::{Lock, SigScheme, Transaction, TxBody, TxOutput};
 use sump_pow::PowContext;
 
 /// Build an unmined block template on top of the current tip.
@@ -57,7 +57,10 @@ pub fn build_block_template(
             inputs: vec![],
             outputs: vec![TxOutput {
                 amount: block_reward(height) + fees,
-                lock: Lock::P2pkh { pkh: payout_pkh },
+                lock: Lock::P2pkh {
+                    scheme: SigScheme::MlDsa,
+                    pkh: payout_pkh,
+                },
             }],
             locktime: 0,
             coinbase_data,

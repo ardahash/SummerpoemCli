@@ -3,13 +3,17 @@
 
 use sump_core::emission::block_reward;
 use sump_core::params::Params;
-use sump_core::tx::{Lock, OutPoint, Transaction, TxBody, TxInput, TxOutput, Witness};
+use sump_core::tx::{Lock, OutPoint, SigScheme, Transaction, TxBody, TxInput, TxOutput, Witness};
 use sump_crypto::Keypair;
 use sump_node::chain::ChainState;
 use sump_node::genesis::build_genesis;
 use sump_node::miner::{build_block_template, mine_and_connect, mine_block};
 use sump_node::ValidationError;
 use sump_pow::PowContext;
+
+fn ml_key(seed: u8) -> Keypair {
+    Keypair::from_seed(SigScheme::MlDsa, &[seed; 32])
+}
 
 struct Harness {
     state: ChainState,
@@ -28,7 +32,7 @@ impl Harness {
             clock: params.genesis_time + 60,
             state,
             ctx,
-            miner_key: Keypair::from_seed(&[1u8; 32]),
+            miner_key: ml_key(1),
         }
     }
 
@@ -69,12 +73,16 @@ impl Harness {
         let change = prev_out.amount - amount - fee;
         let mut outputs = vec![TxOutput {
             amount,
-            lock: Lock::P2pkh { pkh: to_pkh },
+            lock: Lock::P2pkh {
+                scheme: SigScheme::MlDsa,
+                pkh: to_pkh,
+            },
         }];
         if change > 0 {
             outputs.push(TxOutput {
                 amount: change,
                 lock: Lock::P2pkh {
+                    scheme: SigScheme::MlDsa,
                     pkh: key.pubkey_hash(),
                 },
             });
@@ -113,10 +121,10 @@ fn full_lifecycle() {
     assert_eq!(h.state.supply(), expected_supply);
 
     // spend the block-1 coinbase to a recipient
-    let recipient = Keypair::from_seed(&[2u8; 32]);
+    let recipient = ml_key(2);
     let amount = 3 * sump_core::emission::COIN;
     let fee = 100_000;
-    let spend = h.signed_spend(1, &Keypair::from_seed(&[1u8; 32]), recipient.pubkey_hash(), amount, fee);
+    let spend = h.signed_spend(1, &ml_key(1), recipient.pubkey_hash(), amount, fee);
     let got_fee = h.state.validate_standalone_tx(&spend).expect("valid spend");
     assert_eq!(got_fee, fee);
 
@@ -139,7 +147,7 @@ fn full_lifecycle() {
     assert!(found, "recipient owns the new output");
 
     // double spend of the same coinbase must now fail
-    let double = h.signed_spend(1, &Keypair::from_seed(&[1u8; 32]), recipient.pubkey_hash(), 1_000, fee);
+    let double = h.signed_spend(1, &ml_key(1), recipient.pubkey_hash(), 1_000, fee);
     assert!(matches!(
         h.state.validate_standalone_tx(&double),
         Err(ValidationError::UnknownInput(_))
@@ -151,7 +159,7 @@ fn immature_coinbase_rejected() {
     let mut h = Harness::new();
     h.mine(&[]); // height 1
     h.mine(&[]); // height 2: block 1's coinbase is only 1 deep, maturity is 5
-    let spend = h.signed_spend(2, &Keypair::from_seed(&[1u8; 32]), [9u8; 20], 1_000, 1_000);
+    let spend = h.signed_spend(2, &ml_key(1), [9u8; 20], 1_000, 1_000);
     assert!(matches!(
         h.state.validate_standalone_tx(&spend),
         Err(ValidationError::ImmatureCoinbase)
@@ -164,7 +172,7 @@ fn bad_signature_rejected() {
     for _ in 0..6 {
         h.mine(&[]);
     }
-    let mut spend = h.signed_spend(1, &Keypair::from_seed(&[1u8; 32]), [9u8; 20], 1_000, 1_000);
+    let mut spend = h.signed_spend(1, &ml_key(1), [9u8; 20], 1_000, 1_000);
     // corrupt the signature
     spend.witnesses[0].signature[100] ^= 0xff;
     assert!(matches!(
@@ -172,8 +180,8 @@ fn bad_signature_rejected() {
         Err(ValidationError::BadSignature)
     ));
     // wrong key entirely
-    let mut spend2 = h.signed_spend(1, &Keypair::from_seed(&[1u8; 32]), [9u8; 20], 1_000, 1_000);
-    spend2.witnesses[0].pubkey = Keypair::from_seed(&[3u8; 32]).public.clone();
+    let mut spend2 = h.signed_spend(1, &ml_key(1), [9u8; 20], 1_000, 1_000);
+    spend2.witnesses[0].pubkey = ml_key(3).public.clone();
     assert!(matches!(
         h.state.validate_standalone_tx(&spend2),
         Err(ValidationError::WrongPubkey)
@@ -211,7 +219,7 @@ fn simple_reorg_wins_by_work() {
     // build a competing branch B1, B2 from genesis
     let genesis_hash = h.state.genesis_hash();
     let params = h.state.params().clone();
-    let other_pkh = Keypair::from_seed(&[7u8; 32]).pubkey_hash();
+    let other_pkh = ml_key(7).pubkey_hash();
 
     // fork state to build B-branch blocks (fresh state over same genesis)
     let genesis_block = h.state.block_at(0).unwrap();
@@ -228,4 +236,103 @@ fn simple_reorg_wins_by_work() {
     assert_eq!(h.state.height(), 2);
     assert_ne!(h.state.block_at(1).unwrap().header.hash(), a1);
     assert_eq!(h.state.block_at(0).unwrap().header.hash(), genesis_hash);
+}
+
+#[test]
+fn slhdsa_vault_output_spendable() {
+    // Fund a hash-based (SLH-DSA) vault output, then spend it — proving the
+    // dormant scheme validates end-to-end through consensus.
+    let mut h = Harness::new();
+    for _ in 0..6 {
+        h.mine(&[]);
+    }
+    let vault = Keypair::from_seed(SigScheme::SlhDsa, &[42u8; 32]);
+
+    // ML-DSA coinbase (block 1) -> SLH-DSA vault output
+    let (op1, prev1) = h.coinbase_outpoint(1);
+    let fund_amount = 5 * sump_core::emission::COIN;
+    let fee = 100_000;
+    let fund_body = TxBody {
+        version: 1,
+        inputs: vec![TxInput { prevout: op1 }],
+        outputs: vec![TxOutput {
+            amount: fund_amount,
+            lock: Lock::P2pkh {
+                scheme: SigScheme::SlhDsa,
+                pkh: vault.pubkey_hash(),
+            },
+        }],
+        locktime: 0,
+        coinbase_data: vec![],
+    };
+    let ml1 = ml_key(1);
+    let fund = Transaction {
+        witnesses: vec![Witness {
+            pubkey: ml1.public.clone(),
+            signature: ml1.sign(&fund_body.sighash(0, &prev1).0),
+        }],
+        body: fund_body,
+    };
+    let fund_txid = fund.txid();
+    h.state.validate_standalone_tx(&fund).expect("fund valid");
+    h.mine(std::slice::from_ref(&fund));
+
+    // the vault output now exists and is SLH-DSA controlled
+    let vault_out = TxOutput {
+        amount: fund_amount,
+        lock: Lock::P2pkh {
+            scheme: SigScheme::SlhDsa,
+            pkh: vault.pubkey_hash(),
+        },
+    };
+    let vault_op = OutPoint {
+        txid: fund_txid,
+        vout: 0,
+    };
+
+    // spend the vault output with an SLH-DSA signature
+    let spend_body = TxBody {
+        version: 1,
+        inputs: vec![TxInput { prevout: vault_op }],
+        outputs: vec![TxOutput {
+            amount: fund_amount - fee,
+            lock: Lock::P2pkh {
+                scheme: SigScheme::MlDsa,
+                pkh: ml_key(9).pubkey_hash(),
+            },
+        }],
+        locktime: 0,
+        coinbase_data: vec![],
+    };
+    let good_sig = vault.sign(&spend_body.sighash(0, &vault_out).0);
+    let spend = Transaction {
+        witnesses: vec![Witness {
+            pubkey: vault.public.clone(),
+            signature: good_sig.clone(),
+        }],
+        body: spend_body.clone(),
+    };
+    assert_eq!(
+        h.state.validate_standalone_tx(&spend).expect("vault spend valid"),
+        fee
+    );
+
+    // a forged ML-DSA signature over the same spend must be rejected: the
+    // output's scheme byte forces SLH-DSA verification
+    let forger = ml_key(7);
+    let bad = Transaction {
+        witnesses: vec![Witness {
+            pubkey: forger.public.clone(),
+            signature: forger.sign(&spend_body.sighash(0, &vault_out).0),
+        }],
+        body: spend_body,
+    };
+    assert!(matches!(
+        h.state.validate_standalone_tx(&bad),
+        Err(ValidationError::WrongPubkey)
+    ));
+
+    // confirm on-chain (6 warm-up + fund + spend)
+    h.mine(std::slice::from_ref(&spend));
+    assert_eq!(h.state.height(), 8);
 }

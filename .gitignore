@@ -5,3 +5,4 @@ sumpchain*/
 *.wallet.json
 wallet.json
 *.tx
+dist/

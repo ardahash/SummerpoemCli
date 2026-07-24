@@ -5,7 +5,7 @@ use sump_core::compact::{bits_to_target, target_to_bits};
 use sump_core::emission::block_reward;
 use sump_core::hash::Hash256;
 use sump_core::params::Params;
-use sump_core::tx::{Lock, Transaction, TxBody, TxOutput};
+use sump_core::tx::{Lock, SigScheme, Transaction, TxBody, TxOutput};
 use sump_pow::PowContext;
 
 /// Build and mine the genesis block. The genesis coinbase pays the height-0
@@ -20,7 +20,10 @@ pub fn build_genesis(params: &Params, ctx: &PowContext) -> Block {
             inputs: vec![],
             outputs: vec![TxOutput {
                 amount: block_reward(0),
-                lock: Lock::P2pkh { pkh: [0u8; 20] },
+                lock: Lock::P2pkh {
+                    scheme: SigScheme::MlDsa,
+                    pkh: [0u8; 20],
+                },
             }],
             locktime: 0,
             coinbase_data,

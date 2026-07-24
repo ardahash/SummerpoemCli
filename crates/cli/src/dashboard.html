@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Summerpoem node</title>
+<style>
+  :root {
+    --paper: #F7F5EC; --ink: #1B241D; --ink-soft: #4A544C; --line: #D9D4C2;
+    --gold: #A87A12; --gold-strong: #8A6410; --leaf: #3E6B4A; --card: #FFFFFF;
+    --bad: #a13b2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0E140F; --ink: #EDE8D8; --ink-soft: #A8AC9C; --line: #2A342B;
+      --gold: #E0B54A; --gold-strong: #EDC661; --leaf: #7FB08B; --card: #151D16;
+      --bad: #e0876f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    line-height: 1.5;
+  }
+  .mono { font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace; }
+  .wrap { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.4rem; }
+  h1 { font-style: italic; font-weight: 400; font-size: 1.8rem; margin: 0; }
+  .net {
+    font-family: ui-monospace, monospace; font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--gold); border: 1px solid var(--gold);
+    border-radius: 999px; padding: 0.2rem 0.7rem;
+  }
+  .verse { color: var(--ink-soft); font-style: italic; margin: 0 0 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  @media (max-width: 620px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  .tile { background: var(--card); padding: 1.1rem 1.2rem; }
+  .tile .label {
+    font-family: ui-monospace, monospace; font-size: 0.64rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--gold); margin: 0 0 0.45rem;
+  }
+  .tile .value { font-size: 1.55rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tile .sub { font-size: 0.75rem; color: var(--ink-soft); margin-top: 0.25rem; }
+  .status-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
+  .on { background: var(--leaf); } .off { background: var(--ink-soft); }
+  .rows { margin-top: 1.5rem; border: 1px solid var(--line); background: var(--card); }
+  .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 1.1rem; border-top: 1px solid var(--line); font-size: 0.9rem; }
+  .row:first-child { border-top: none; }
+  .row .k { color: var(--ink-soft); }
+  .row .v { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; text-align: right; }
+  footer { margin-top: 1.5rem; color: var(--ink-soft); font-size: 0.78rem; }
+  .stale { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Summerpoem node</h1>
+    <span class="net" id="net">…</span>
+  </header>
+  <p class="verse" id="verse">watching the chain…</p>
+
+  <div class="grid">
+    <div class="tile"><p class="label">Height</p><div class="value" id="height">—</div><div class="sub" id="supply"></div></div>
+    <div class="tile"><p class="label">Mining</p><div class="value"><span class="status-dot off" id="minedot"></span><span id="mining">—</span></div><div class="sub" id="rig"></div></div>
+    <div class="tile"><p class="label">Hashrate</p><div class="value" id="hashrate">—</div><div class="sub">this session</div></div>
+    <div class="tile"><p class="label">Balance</p><div class="value" id="balance">—</div><div class="sub">SUMP (spendable)</div></div>
+    <div class="tile"><p class="label">Peers</p><div class="value" id="peers">—</div><div class="sub" id="known"></div></div>
+    <div class="tile"><p class="label">Mempool</p><div class="value" id="mempool">—</div><div class="sub">pending tx</div></div>
+  </div>
+
+  <div class="rows">
+    <div class="row"><span class="k">Tip</span><span class="v" id="tip">—</span></div>
+    <div class="row"><span class="k">Address</span><span class="v" id="address">—</span></div>
+    <div class="row"><span class="k">Vault address</span><span class="v" id="vault">—</span></div>
+  </div>
+
+  <footer id="foot">Auto-refreshing every 2s.</footer>
+</div>
+
+<script>
+  function fmtHashrate(h) {
+    if (h >= 1e9) return (h / 1e9).toFixed(2) + " GH/s";
+    if (h >= 1e6) return (h / 1e6).toFixed(2) + " MH/s";
+    if (h >= 1e3) return (h / 1e3).toFixed(1) + " kH/s";
+    return Math.round(h) + " H/s";
+  }
+  function shorten(s) { return s.length > 20 ? s.slice(0, 10) + "…" + s.slice(-10) : s; }
+  async function tick() {
+    try {
+      const r = await fetch("/status");
+      const d = await r.json();
+      document.getElementById("net").textContent = d.network;
+      document.getElementById("height").textContent = d.height.toLocaleString();
+      document.getElementById("supply").textContent = d.supply.toLocaleString(undefined, {maximumFractionDigits: 2}) + " SUMP issued";
+      const mining = d.mining;
+      document.getElementById("mining").textContent = mining ? "active" : "idle";
+      document.getElementById("minedot").className = "status-dot " + (mining ? "on" : "off");
+      document.getElementById("rig").textContent = mining ? (d.gpu ? "GPU (CUDA)" : "CPU") : "";
+      document.getElementById("hashrate").textContent = mining ? fmtHashrate(d.hashrate) : "—";
+      document.getElementById("balance").textContent = d.balance.toLocaleString(undefined, {maximumFractionDigits: 8});
+      document.getElementById("peers").textContent = d.peers;
+      document.getElementById("known").textContent = d.known_addrs + " known addresses";
+      document.getElementById("mempool").textContent = d.mempool;
+      document.getElementById("tip").textContent = d.tip;
+      document.getElementById("address").textContent = d.address;
+      document.getElementById("vault").textContent = d.vault;
+      document.getElementById("verse").textContent = "What if life was meant to be lived.";
+      document.getElementById("foot").textContent = "Auto-refreshing every 2s · last update " + new Date().toLocaleTimeString();
+      document.getElementById("foot").classList.remove("stale");
+    } catch (e) {
+      document.getElementById("foot").textContent = "Node not responding — is it still running?";
+      document.getElementById("foot").classList.add("stale");
+    }
+  }
+  tick();
+  setInterval(tick, 2000);
+</script>
+</body>
+</html>

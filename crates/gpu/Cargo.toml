@@ -1,0 +1,21 @@
+[package]
+name = "sump-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sump-core.workspace = true
+sump-pow.workspace = true
+primitive-types.workspace = true
+thiserror.workspace = true
+# cuda-12060 selects the sys binding ABI; the driver API we use (module load
+# + launch via nvcuda.dll) is stable across 12.x/13.x, so this works against
+# the installed CUDA 13 driver. We compile PTX with nvcc and never call NVRTC.
+cudarc = { version = "0.12", features = ["driver", "nvrtc", "std", "cuda-12060"], default-features = false }
+
+[build-dependencies]
+# (build script uses only std + nvcc)
+
+[dev-dependencies]
+sump-crypto.workspace = true

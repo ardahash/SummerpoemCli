@@ -128,6 +128,59 @@ impl ChainState {
         self.all.get(h).cloned()
     }
 
+    /// Any known block (active or side chain) by hash.
+    pub fn block_by_hash(&self, hash: &Hash256) -> Option<Arc<Block>> {
+        self.all.get(hash).cloned()
+    }
+
+    pub fn contains_block(&self, hash: &Hash256) -> bool {
+        self.all.contains_key(hash)
+    }
+
+    /// True if `hash` is part of the current active chain.
+    pub fn is_active(&self, hash: &Hash256) -> bool {
+        match self.meta.get(hash) {
+            Some(m) => self.active.get(m.height as usize) == Some(hash),
+            None => false,
+        }
+    }
+
+    /// Bitcoin-style block locator: dense near the tip, exponentially
+    /// sparser toward genesis, always ending with genesis.
+    pub fn locator(&self) -> Vec<Hash256> {
+        let mut out = Vec::new();
+        let tip = self.height() as i64;
+        let mut step: i64 = 1;
+        let mut h = tip;
+        while h > 0 {
+            out.push(self.active[h as usize]);
+            if out.len() >= 10 {
+                step *= 2;
+            }
+            h -= step;
+        }
+        out.push(self.active[0]);
+        out
+    }
+
+    /// Active-chain block hashes after the first locator entry we recognize
+    /// (fork point), oldest first, up to `max`.
+    pub fn hashes_after_locator(&self, locator: &[Hash256], max: usize) -> Vec<Hash256> {
+        let mut start_height = 0u64; // default: after genesis
+        for h in locator {
+            if self.is_active(h) {
+                start_height = self.meta[h].height;
+                break;
+            }
+        }
+        self.active
+            .iter()
+            .skip(start_height as usize + 1)
+            .take(max)
+            .cloned()
+            .collect()
+    }
+
     pub fn tip_header_time(&self) -> u64 {
         self.meta[&self.tip_hash()].time
     }
@@ -241,12 +294,36 @@ impl ChainState {
         );
         self.all.insert(hash, Arc::new(block));
 
-        let tip_work = self.meta[&self.tip_hash()].cum_work;
+        let tip_hash = self.tip_hash();
+        let tip_work = self.meta[&tip_hash].cum_work;
         if cum_work <= tip_work {
             return Ok(false); // side chain, kept for later
         }
 
-        // walk back to genesis to build the candidate active chain
+        // fast path: the block extends the current tip — apply incrementally
+        if parent_hash == tip_hash {
+            let block = self.all[&hash].clone();
+            let mut utxos = self.utxos.clone();
+            match validate_block_txs(&self.params, &mut utxos, &block, height) {
+                Ok(minted) => {
+                    let supply = self
+                        .supply
+                        .checked_add(minted)
+                        .ok_or(ValidationError::Overflow)?;
+                    self.active.push(hash);
+                    self.utxos = utxos;
+                    self.supply = supply;
+                    return Ok(true);
+                }
+                Err(e) => {
+                    self.meta.remove(&hash);
+                    self.all.remove(&hash);
+                    return Err(e);
+                }
+            }
+        }
+
+        // reorg: walk back to genesis and re-apply the whole candidate chain
         let mut chain = Vec::with_capacity(height as usize + 1);
         let mut cur = hash;
         loop {
@@ -364,8 +441,10 @@ fn check_tx(
         if sump_crypto::pubkey_hash(&w.pubkey) != *utxo.output.lock.pkh() {
             return Err(ValidationError::WrongPubkey);
         }
+        // the output's scheme byte (committed to by the sighash) selects the
+        // verifier, so a signature cannot be replayed across schemes
         let sighash = tx.body.sighash(i as u32, &utxo.output);
-        if !sump_crypto::verify(&w.pubkey, &sighash.0, &w.signature) {
+        if !sump_crypto::verify(utxo.output.lock.scheme(), &w.pubkey, &sighash.0, &w.signature) {
             return Err(ValidationError::BadSignature);
         }
         in_total = in_total

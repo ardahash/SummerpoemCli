@@ -49,6 +49,9 @@ pub struct Params {
     pub genesis_time: u64,
     pub genesis_message: &'static str,
     pub address_hrp: &'static str,
+    /// Default seed nodes for peer discovery (host:port). Filled in for
+    /// mainnet at deployment; empty on regtest.
+    pub seeds: &'static [&'static str],
 }
 
 impl Params {
@@ -67,9 +70,11 @@ impl Params {
                 accesses: 64,
                 parents: 64,
             },
-            genesis_time: 1_782_864_000, // 2026-07-01T00:00:00Z
-            genesis_message: "Summerpoem genesis: the chain that never assumed quantum computers can't exist.",
+            genesis_time: 1_784_851_200, // 2026-07-24T00:00:00Z
+            genesis_message: "What if life was meant to be lived",
             address_hrp: "sump",
+            // Set at deployment: public seed node addresses.
+            seeds: &[],
         }
     }
 
@@ -91,6 +96,7 @@ impl Params {
             genesis_time: 1_782_864_000,
             genesis_message: "Summerpoem regtest genesis.",
             address_hrp: "sumprt",
+            seeds: &[],
         }
     }
 

@@ -1,11 +1,13 @@
-//! File-backed wallet: a master seed, sequentially derived ML-DSA keys.
+//! File-backed wallet: a master seed, deterministically derived keys in both
+//! signature schemes (ML-DSA for everyday addresses, SLH-DSA for vaults).
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use sump_core::hash::sha3;
 use sump_core::params::Params;
-use sump_core::tx::{Lock, OutPoint, Transaction, TxBody, TxInput, TxOutput, Witness};
+use sump_core::tx::{Lock, OutPoint, SigScheme, Transaction, TxBody, TxInput, TxOutput, Witness};
 use sump_crypto::{address, Keypair};
 use sump_node::ChainState;
 
@@ -20,6 +22,8 @@ pub struct Wallet {
     pub file: WalletFile,
     seed: [u8; 32],
 }
+
+const SCHEMES: [SigScheme; 2] = [SigScheme::MlDsa, SigScheme::SlhDsa];
 
 impl Wallet {
     pub fn create(path: &Path, network: &str) -> Result<Wallet> {
@@ -57,35 +61,69 @@ impl Wallet {
         Ok(())
     }
 
-    fn key_seed(&self, index: u32) -> [u8; 32] {
-        sha3(&[b"sump/wallet/key/v1", &self.seed, &index.to_le_bytes()]).0
+    fn key_seed(&self, scheme: SigScheme, index: u32) -> [u8; 32] {
+        sha3(&[
+            b"sump/wallet/key/v1",
+            &self.seed,
+            &[scheme.id()],
+            &index.to_le_bytes(),
+        ])
+        .0
     }
 
-    pub fn key(&self, index: u32) -> Keypair {
-        Keypair::from_seed(&self.key_seed(index))
+    pub fn key(&self, scheme: SigScheme, index: u32) -> Keypair {
+        Keypair::from_seed(scheme, &self.key_seed(scheme, index))
     }
 
+    /// All owned keys across both schemes and every derived index.
     pub fn keys(&self) -> Vec<Keypair> {
-        (0..self.file.next_index).map(|i| self.key(i)).collect()
+        let mut out = Vec::new();
+        for scheme in SCHEMES {
+            for i in 0..self.file.next_index {
+                out.push(self.key(scheme, i));
+            }
+        }
+        out
     }
 
+    /// Map (scheme, pkh) -> owning key, for ownership tests and signing.
+    fn owned(&self) -> HashMap<(u8, [u8; 20]), Keypair> {
+        let mut m = HashMap::new();
+        for kp in self.keys() {
+            m.insert((kp.scheme.id(), kp.pubkey_hash()), kp);
+        }
+        m
+    }
+
+    /// Everyday receiving address (ML-DSA), index 0.
     pub fn address(&self, params: &Params, index: u32) -> String {
+        let kp = self.key(SigScheme::MlDsa, index);
+        address::encode(params.address_hrp, address::VERSION_MLDSA, &kp.pubkey_hash())
+    }
+
+    /// Vault receiving address (SLH-DSA, hash-based), index 0.
+    pub fn vault_address(&self, params: &Params, index: u32) -> String {
+        let kp = self.key(SigScheme::SlhDsa, index);
         address::encode(
             params.address_hrp,
-            address::VERSION_MLDSA,
-            &self.key(index).pubkey_hash(),
+            address::VERSION_SLHDSA,
+            &kp.pubkey_hash(),
         )
+    }
+
+    fn owns(&self, lock: &Lock, owned: &HashMap<(u8, [u8; 20]), Keypair>) -> bool {
+        owned.contains_key(&(lock.scheme().id(), *lock.pkh()))
     }
 
     /// Spendable (mature, non-timelocked) confirmed balance in stanzas.
     pub fn balance(&self, state: &ChainState) -> u64 {
-        let ours: Vec<[u8; 20]> = self.keys().iter().map(|k| k.pubkey_hash()).collect();
+        let owned = self.owned();
         let next_height = state.height() + 1;
         let maturity = state.params().coinbase_maturity;
         state
             .utxos()
             .values()
-            .filter(|u| ours.contains(u.output.lock.pkh()))
+            .filter(|u| self.owns(&u.output.lock, &owned))
             .filter(|u| !u.coinbase || next_height >= u.height + maturity)
             .filter(|u| match u.output.lock {
                 Lock::Timelock { height, .. } => next_height >= height,
@@ -95,20 +133,22 @@ impl Wallet {
             .sum()
     }
 
-    /// Build and sign a payment. Selects UTXOs greedily (largest first).
+    /// Build and sign a payment. Selects UTXOs greedily (largest first). The
+    /// output scheme is taken from the recipient address version.
     pub fn build_send(
         &self,
         state: &ChainState,
+        to_scheme: SigScheme,
         to_pkh: [u8; 20],
         amount: u64,
         fee: u64,
     ) -> Result<Transaction> {
-        let keys = self.keys();
+        let owned = self.owned();
         let next_height = state.height() + 1;
         let maturity = state.params().coinbase_maturity;
 
-        // (outpoint, output, key index) of spendable utxos we own
-        let mut candidates: Vec<(OutPoint, TxOutput, usize)> = Vec::new();
+        // (outpoint, output) of spendable utxos we own
+        let mut candidates: Vec<(OutPoint, TxOutput)> = Vec::new();
         for (op, u) in state.utxos() {
             if u.coinbase && next_height < u.height + maturity {
                 continue;
@@ -118,11 +158,8 @@ impl Wallet {
                     continue;
                 }
             }
-            if let Some(ki) = keys
-                .iter()
-                .position(|k| k.pubkey_hash() == *u.output.lock.pkh())
-            {
-                candidates.push((*op, u.output.clone(), ki));
+            if self.owns(&u.output.lock, &owned) {
+                candidates.push((*op, u.output.clone()));
             }
         }
         candidates.sort_by_key(|c| std::cmp::Reverse(c.1.amount));
@@ -130,7 +167,7 @@ impl Wallet {
         let need = amount
             .checked_add(fee)
             .ok_or_else(|| anyhow!("amount overflow"))?;
-        let mut selected: Vec<(OutPoint, TxOutput, usize)> = Vec::new();
+        let mut selected: Vec<(OutPoint, TxOutput)> = Vec::new();
         let mut total = 0u64;
         for c in candidates {
             if total >= need {
@@ -150,13 +187,18 @@ impl Wallet {
         let change = total - need;
         let mut outputs = vec![TxOutput {
             amount,
-            lock: Lock::P2pkh { pkh: to_pkh },
+            lock: Lock::P2pkh {
+                scheme: to_scheme,
+                pkh: to_pkh,
+            },
         }];
         if change > 0 {
+            // change returns to our everyday (ML-DSA) address
             outputs.push(TxOutput {
                 amount: change,
                 lock: Lock::P2pkh {
-                    pkh: keys[0].pubkey_hash(),
+                    scheme: SigScheme::MlDsa,
+                    pkh: self.key(SigScheme::MlDsa, 0).pubkey_hash(),
                 },
             });
         }
@@ -165,7 +207,7 @@ impl Wallet {
             version: 1,
             inputs: selected
                 .iter()
-                .map(|(op, _, _)| TxInput { prevout: *op })
+                .map(|(op, _)| TxInput { prevout: *op })
                 .collect(),
             outputs,
             locktime: 0,
@@ -173,9 +215,11 @@ impl Wallet {
         };
 
         let mut witnesses = Vec::with_capacity(selected.len());
-        for (i, (_, prev_out, ki)) in selected.iter().enumerate() {
+        for (i, (_, prev_out)) in selected.iter().enumerate() {
+            let key = owned
+                .get(&(prev_out.lock.scheme().id(), *prev_out.lock.pkh()))
+                .ok_or_else(|| anyhow!("missing key for selected input"))?;
             let sighash = body.sighash(i as u32, prev_out);
-            let key = &keys[*ki];
             witnesses.push(Witness {
                 pubkey: key.public.clone(),
                 signature: key.sign(&sighash.0),

@@ -17,30 +17,73 @@ pub struct OutPoint {
     pub vout: u32,
 }
 
+/// The signature scheme that controls an output. Also the address version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SigScheme {
+    /// ML-DSA-44 (FIPS 204) — the default, live at launch.
+    MlDsa,
+    /// SLH-DSA-128s (FIPS 205) — hash-based "vault" scheme.
+    SlhDsa,
+}
+
+impl SigScheme {
+    pub fn id(&self) -> u8 {
+        match self {
+            SigScheme::MlDsa => 0,
+            SigScheme::SlhDsa => 1,
+        }
+    }
+
+    pub fn from_id(id: u8) -> Option<SigScheme> {
+        match id {
+            0 => Some(SigScheme::MlDsa),
+            1 => Some(SigScheme::SlhDsa),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Lock {
-    /// Pay to SHA3-256(public key), truncated to 20 bytes.
-    P2pkh { pkh: [u8; 20] },
+    /// Pay to SHA3-256(public key), truncated to 20 bytes, under `scheme`.
+    P2pkh { scheme: SigScheme, pkh: [u8; 20] },
     /// Same, but unspendable before `height`.
-    Timelock { pkh: [u8; 20], height: u64 },
+    Timelock {
+        scheme: SigScheme,
+        pkh: [u8; 20],
+        height: u64,
+    },
 }
 
 impl Lock {
     pub fn pkh(&self) -> &[u8; 20] {
         match self {
-            Lock::P2pkh { pkh } => pkh,
+            Lock::P2pkh { pkh, .. } => pkh,
             Lock::Timelock { pkh, .. } => pkh,
+        }
+    }
+
+    pub fn scheme(&self) -> SigScheme {
+        match self {
+            Lock::P2pkh { scheme, .. } => *scheme,
+            Lock::Timelock { scheme, .. } => *scheme,
         }
     }
 
     pub fn encode_into(&self, out: &mut Vec<u8>) {
         match self {
-            Lock::P2pkh { pkh } => {
+            Lock::P2pkh { scheme, pkh } => {
                 put_u8(out, 0);
+                put_u8(out, scheme.id());
                 out.extend_from_slice(pkh);
             }
-            Lock::Timelock { pkh, height } => {
+            Lock::Timelock {
+                scheme,
+                pkh,
+                height,
+            } => {
                 put_u8(out, 1);
+                put_u8(out, scheme.id());
                 out.extend_from_slice(pkh);
                 put_u64(out, *height);
             }
@@ -50,15 +93,21 @@ impl Lock {
     pub fn decode(r: &mut Reader) -> Result<Lock, DecodeError> {
         match r.read_u8()? {
             0 => Ok(Lock::P2pkh {
+                scheme: read_scheme(r)?,
                 pkh: r.read_array()?,
             }),
             1 => Ok(Lock::Timelock {
+                scheme: read_scheme(r)?,
                 pkh: r.read_array()?,
                 height: r.read_u64()?,
             }),
             _ => Err(DecodeError::Invalid("unknown lock type")),
         }
     }
+}
+
+fn read_scheme(r: &mut Reader) -> Result<SigScheme, DecodeError> {
+    SigScheme::from_id(r.read_u8()?).ok_or(DecodeError::Invalid("unknown signature scheme"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -246,11 +295,15 @@ mod tests {
                 outputs: vec![
                     TxOutput {
                         amount: 5000,
-                        lock: Lock::P2pkh { pkh: [7u8; 20] },
+                        lock: Lock::P2pkh {
+                            scheme: SigScheme::MlDsa,
+                            pkh: [7u8; 20],
+                        },
                     },
                     TxOutput {
                         amount: 100,
                         lock: Lock::Timelock {
+                            scheme: SigScheme::SlhDsa,
                             pkh: [9u8; 20],
                             height: 42,
                         },
@@ -288,11 +341,17 @@ mod tests {
         let tx = sample_tx();
         let out_a = TxOutput {
             amount: 1,
-            lock: Lock::P2pkh { pkh: [0u8; 20] },
+            lock: Lock::P2pkh {
+                scheme: SigScheme::MlDsa,
+                pkh: [0u8; 20],
+            },
         };
         let out_b = TxOutput {
             amount: 2,
-            lock: Lock::P2pkh { pkh: [0u8; 20] },
+            lock: Lock::P2pkh {
+                scheme: SigScheme::MlDsa,
+                pkh: [0u8; 20],
+            },
         };
         assert_ne!(tx.body.sighash(0, &out_a), tx.body.sighash(0, &out_b));
         assert_ne!(tx.body.sighash(0, &out_a), tx.body.sighash(1, &out_a));

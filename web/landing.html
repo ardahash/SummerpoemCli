@@ -27,30 +27,6 @@
       --chip-bg: #1A231B;
     }
   }
-  :root[data-theme="light"] {
-    --paper: #F7F5EC;
-    --ink: #1B241D;
-    --ink-soft: #4A544C;
-    --line: #D9D4C2;
-    --gold: #A87A12;
-    --gold-strong: #8A6410;
-    --leaf: #3E6B4A;
-    --card: #FFFFFF;
-    --code-bg: #EFECDF;
-    --chip-bg: #EDEADB;
-  }
-  :root[data-theme="dark"] {
-    --paper: #0E140F;
-    --ink: #EDE8D8;
-    --ink-soft: #A8AC9C;
-    --line: #2A342B;
-    --gold: #E0B54A;
-    --gold-strong: #EDC661;
-    --leaf: #7FB08B;
-    --card: #151D16;
-    --code-bg: #1A231B;
-    --chip-bg: #1A231B;
-  }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -135,7 +111,7 @@
     border: 1px solid var(--line);
   }
   a.btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
-  a.btn:focus-visible, a:focus-visible, summary:focus-visible {
+  a.btn:focus-visible, a:focus-visible {
     outline: 2px solid var(--gold);
     outline-offset: 2px;
   }
@@ -329,7 +305,11 @@
     </p>
     <ul class="chips">
       <li class="chip live">regtest live &middot; tests passing</li>
-      <li class="chip tba">mainnet: TBA</li>
+      <li class="chip live">p2p network live</li>
+      <li class="chip live">gpu miner live</li>
+      <li class="chip live">slh-dsa vaults live</li>
+      <li class="chip live">hardened &middot; 59 tests</li>
+      <li class="chip tba">genesis: 2026-07-24</li>
       <li class="chip">fair launch &middot; 0% premine</li>
       <li class="chip">ML-DSA-44 &middot; FIPS 204</li>
     </ul>
@@ -356,16 +336,17 @@
         <h3>Post-quantum by construction</h3>
         <p>Every spend is signed with ML-DSA-44, NIST's primary post-quantum
         standard. Addresses are SHA3-256 hashes — your public key stays hidden
-        until you spend. A hash-based fallback (SLH-DSA) is specified and dormant,
-        one soft fork away.</p>
+        until you spend. For cold storage, opt-in SLH-DSA vault addresses rest
+        on nothing but SHA3 itself.</p>
       </div>
       <div class="pillar">
         <span class="tag">Mining</span>
         <h3>Your GPU is the mining rig</h3>
         <p>SumpHash v1 is memory-hard: a fixed 2&nbsp;GiB dataset and random reads
         that make DRAM bandwidth the bottleneck — the resource consumer graphics
-        cards deliver best per dollar. The dataset never grows, so a 4&nbsp;GB card
-        stays viable forever.</p>
+        cards deliver best per dollar. The CUDA miner runs at ~24&nbsp;MH/s on an
+        RTX&nbsp;5070&nbsp;Ti, ~238&times; a single CPU thread. The dataset never
+        grows, so a 4&nbsp;GB card stays viable forever.</p>
       </div>
       <div class="pillar">
         <span class="tag">Launch</span>
@@ -393,9 +374,11 @@
         <tr><td>block size</td><td>4 MB (&#8776;16 tx/s at launch; 10&ndash;20&times; more after STARK compression)</td></tr>
         <tr><td>initial reward</td><td>13.8458 SUMP, smooth geometric decay, half-life &#8776;4 years</td></tr>
         <tr><td>signatures</td><td>ML-DSA-44 (FIPS 204) &middot; sig 2,420 B &middot; pubkey 1,312 B</td></tr>
-        <tr><td>fallback scheme</td><td>SLH-DSA-128s (FIPS 205), fully specified, dormant</td></tr>
+        <tr><td>vault scheme</td><td>SLH-DSA-128s (FIPS 205) &middot; opt-in, hash-only security</td></tr>
         <tr><td>proof of work</td><td>SumpHash v1 &middot; SHA3/SHAKE &middot; fixed 2 GiB dataset</td></tr>
         <tr><td>verification</td><td>64 MiB light cache &middot; any node verifies in milliseconds, no GPU</td></tr>
+        <tr><td>gpu miner</td><td>CUDA &middot; ~24 MH/s on RTX 5070 Ti &middot; bit-identical to CPU</td></tr>
+        <tr><td>p2p transport</td><td>ML-KEM-768 (FIPS 203) handshake &middot; ChaCha20-Poly1305 frames</td></tr>
         <tr><td>addresses</td><td>bech32m, sump1&hellip; &middot; SHA3-256 of pubkey</td></tr>
         <tr><td>coinbase maturity</td><td>100 blocks</td></tr>
         <tr><td>premine</td><td>0%</td></tr>
@@ -410,9 +393,10 @@
     <p class="kicker">Mining launch</p>
     <h2>When the network opens, everyone starts at block one.</h2>
     <p class="lede">
-      Mainnet genesis has not been cut — the launch date will be announced here
-      once peer-to-peer networking ships. Here is exactly what launch will look
-      like, committed in advance:
+      Genesis is set for <strong>24 July 2026</strong>. The software is built,
+      hardened, and packaged; the genesis hash is published on the roadmap
+      below so you can verify the chain from block one. What launch looks like,
+      committed in advance:
     </p>
     <p><strong>Fair launch.</strong> Mining opens for everyone at the same
     moment. There is no premine and no allocation; the only SUMP that will ever
@@ -455,18 +439,21 @@ sump wallet new</pre>
 sump wallet balance</pre>
       </li>
       <li>
-        <h3>Send a payment, mine it in</h3>
-        <p>Transactions wait in the mempool until the next block picks them up —
-        exactly as mainnet will behave.</p>
-        <pre class="code">sump wallet send --to sumprt1q&hellip; --amount 5.5
-sump miner mine --blocks 1</pre>
+        <h3>Or: one command, with a live dashboard</h3>
+        <p>A single self-contained executable is the node, wallet, and miner.
+        It gossips over ML-KEM-encrypted channels, mines on your GPU (CPU
+        fallback if no CUDA), and serves a local web dashboard.</p>
+        <pre class="code">sump wallet new
+sump node run --mine --gpu --gui</pre>
+        <p>Open the printed <span class="mono">http://127.0.0.1:8787</span> to
+        watch height, hashrate, and balance update live.</p>
       </li>
     </ol>
     <div class="note">
-      <strong>Mainnet hardware:</strong> a consumer GPU with at least 4&nbsp;GB of
-      memory once the GPU kernels ship (v0.3); the CPU reference miner works from
-      day one. Running a <em>validating node</em> needs no GPU at all — 64&nbsp;MiB
-      and any CPU verify the chain.
+      <strong>Mainnet hardware:</strong> a consumer GPU with at least 4&nbsp;GB
+      of memory for GPU mining; the CPU miner works on any machine. Running a
+      <em>validating node</em> needs no GPU at all — 64&nbsp;MiB and any CPU
+      verify the chain.
     </div>
   </section>
 
@@ -475,8 +462,8 @@ sump miner mine --blocks 1</pre>
   <section id="patches">
     <p class="kicker">Upcoming patches</p>
     <h2>The road to genesis, in order.</h2>
-    <p class="lede">Each stage gates the next; mainnet launches when the network
-    layer is proven.</p>
+    <p class="lede">Each stage gates the next; mainnet launches after the final
+    stages and a dedicated testing period.</p>
     <ul class="road">
       <li class="done">
         <span class="stage">v0.1 &middot; shipped &middot; july 2026</span>
@@ -485,31 +472,48 @@ sump miner mine --blocks 1</pre>
         mining, tested), ML-DSA-44 wallets, ASERT difficulty, emission schedule,
         CPU miner, regtest CLI. All tests passing, end-to-end payments working.</p>
       </li>
-      <li class="next">
-        <span class="stage">v0.2 &middot; next up</span>
+      <li class="done">
+        <span class="stage">v0.2 &middot; shipped &middot; july 2026</span>
         <h3>The network — P2P with post-quantum transport</h3>
         <p>Node-to-node gossip, chain sync, and mempool relay over channels
-        encrypted with ML-KEM (FIPS 203) — quantum-resistant signatures deserve
-        quantum-resistant transport. This is the gate to mainnet.</p>
+        encrypted with ML-KEM-768 (FIPS 203) and ChaCha20-Poly1305 —
+        quantum-resistant signatures now travel over quantum-resistant
+        transport. Live two-node sync verified at &#8776;1,100 blocks/s.</p>
       </li>
-      <li>
-        <span class="stage">v0.3</span>
+      <li class="done">
+        <span class="stage">v0.3 &middot; shipped &middot; july 2026</span>
         <h3>GPU miner kernels</h3>
-        <p>OpenCL/CUDA kernels for SumpHash, turning the CPU reference loop into
-        the real DRAM-bandwidth race consumer cards are built to win.</p>
+        <p>A CUDA kernel for SumpHash, bit-identical to the CPU reference and
+        verified against it. Measured at ~24&nbsp;MH/s on an RTX&nbsp;5070&nbsp;Ti
+        — ~238&times; a single CPU thread — proving the memory-bound design runs
+        exactly where it was meant to: on consumer graphics cards.</p>
       </li>
-      <li>
-        <span class="stage">v0.4</span>
+      <li class="done">
+        <span class="stage">v0.4 &middot; shipped &middot; july 2026</span>
         <h3>SLH-DSA vault addresses</h3>
-        <p>The dormant hash-based output type becomes activatable: opt-in vault
-        addresses for cold storage whose security assumes nothing beyond SHA3
-        itself.</p>
+        <p>The hash-based output type is live: opt-in vault addresses for cold
+        storage whose security assumes nothing beyond SHA3 itself. Each output
+        records its scheme, and the signature hash commits to it — so a
+        signature can never be replayed across schemes. Verified end-to-end,
+        funding and spending a vault.</p>
+      </li>
+      <li class="done">
+        <span class="stage">hardening &middot; complete &middot; july 2026</span>
+        <h3>The testing pass</h3>
+        <p>58 tests: decoder fuzzing (hostile input never crashes a node),
+        property tests on the emission and difficulty math, an adversarial
+        block-rejection matrix, reorg rollback of balances and mempool, and
+        multi-node convergence — proven both in-process and with three live
+        nodes syncing over the encrypted network.</p>
       </li>
       <li class="next">
-        <span class="stage">mainnet &middot; date TBA</span>
+        <span class="stage">mainnet &middot; genesis 2026-07-24</span>
         <h3>Genesis — mining launch</h3>
-        <p>Fair launch under a declared beta period. Announced here, with the
-        genesis hash published in advance.</p>
+        <p>Fair launch, block one for everyone. The genesis coinbase reads
+        <em>"What if life was meant to be lived."</em> Verify you are on the
+        real chain by its genesis hash, published here in advance:</p>
+        <pre class="code">60235b421eb3478072192851a1ea05
+eeb221dd8821aeaacb3fcd361abb21ca0d</pre>
       </li>
       <li>
         <span class="stage">phase 2</span>

@@ -5,11 +5,13 @@ members = [
     "crates/pow",
     "crates/crypto",
     "crates/node",
+    "crates/net",
+    "crates/gpu",
     "crates/cli",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 
@@ -18,12 +20,17 @@ sump-core = { path = "crates/core" }
 sump-pow = { path = "crates/pow" }
 sump-crypto = { path = "crates/crypto" }
 sump-node = { path = "crates/node" }
+sump-net = { path = "crates/net" }
+sump-gpu = { path = "crates/gpu" }
 
 sha3 = "0.10"
+fips203 = "0.4"
+chacha20poly1305 = "0.10"
 primitive-types = "0.13"
 hex = "0.4"
 thiserror = "2"
 fips204 = "0.4"
+fips205 = "0.4"
 rand_core = "0.6"
 rand_chacha = "0.3"
 getrandom = "0.2"

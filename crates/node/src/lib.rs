@@ -3,8 +3,10 @@
 pub mod chain;
 pub mod error;
 pub mod genesis;
+pub mod mempool;
 pub mod miner;
 pub mod store;
 
 pub use chain::{ChainState, Utxo};
 pub use error::ValidationError;
+pub use mempool::{Mempool, MempoolError};
