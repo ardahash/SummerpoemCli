@@ -90,8 +90,9 @@ Open the printed `http://127.0.0.1:8787` in a browser for a live dashboard
 (height, hashrate, balance, peers, mempool, addresses). Drop `--gpu` to mine
 on CPU; drop `--gui` for terminal-only.
 
-A prebuilt single-executable package is produced under `dist/`
-(`summerpoem-v<version>-windows-x64.zip`: `sump.exe` + QUICKSTART).
+Prebuilt packages are produced under `dist/`:
+`summerpoem-v<version>-windows-x64.zip` and
+`summerpoem-v<version>-linux-x64.tar.gz`.
 
 ## GPU mining
 
@@ -120,7 +121,7 @@ must be selected explicitly with `--network regtest`.
 
 ## Status
 
-v0.5.4 mainnet hardening complete (58 tests). Implemented and
+v0.5.5 mainnet hardening complete (58 tests). Implemented and
 tested: consensus core (validation, reorgs, emission, difficulty, PoW), P2P
 networking (ML-KEM encrypted transport, gossip, chain sync, mempool relay),
 the CUDA GPU miner (bit-identical to the CPU reference, ~238× a single CPU
