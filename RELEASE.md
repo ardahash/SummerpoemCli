@@ -26,6 +26,19 @@ dumpbin /dependents target\release\sump.exe
 
 ## Package
 
+Before packaging, confirm the public bootstrap seed is reachable at
+`seed.summerpoem.org:8776`. Do not ship a public miner if the seed hostname is
+missing, private-only, or pointed at an offline node.
+
+Recommended `Start Mining.bat` contents:
+
+```bat
+@echo off
+if not exist "%~dp0wallet.json" "%~dp0sump.exe" wallet new --wallet "%~dp0wallet.json"
+"%~dp0sump.exe" --chain-dir "%~dp0sumpchain" node run --mine --gpu --gui --wallet "%~dp0wallet.json" --connect seed.summerpoem.org:8776
+pause
+```
+
 ```powershell
 $dist = "dist"
 Copy-Item target\release\sump.exe "$dist\sump.exe" -Force
@@ -39,6 +52,8 @@ The `.bat` launchers give non-technical users a double-click experience
 (`sump.exe` is a CLI — double-clicking it alone just flashes a console).
 They invoke the exe by absolute path (`%~dp0sump.exe`) so they work even
 where the current directory is not on the executable search path.
+`Start Mining.bat` includes an explicit `--connect seed.summerpoem.org:8776`
+fallback in addition to the binary's built-in mainnet seed list.
 
 ## Publish (GitHub Release)
 
@@ -49,7 +64,8 @@ where the current directory is not on the executable search path.
    - the SHA-256 of the zip (so downloaders can verify integrity), and
    - the mainnet genesis hash
      (`60235b421eb3478072192851a1ea05eeb221dd8821aeaacb3fcd361abb21ca0d`),
-     so anyone can confirm their node built the same genesis.
+     so anyone can confirm their node initialized the same chain, and
+   - the public bootstrap seed address (`seed.summerpoem.org:8776`).
 
 The landing page's Download button points at
 `https://github.com/ardahash/SummerpoemCli/releases/latest`, which always

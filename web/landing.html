@@ -418,8 +418,9 @@
     <p class="kicker">How to mine</p>
     <h2>If you can build a Rust project, you can mine a block today.</h2>
     <p class="lede">
-      Public mining begins at mainnet genesis. Until then, everything is testable
-      on a local regtest chain — the same consensus code mainnet will run.
+      Public mining syncs through bootstrap seed nodes before hashing.
+      Local regtest remains available for private testing with the same
+      consensus code.
     </p>
     <ol class="steps">
       <li>
@@ -430,14 +431,14 @@
       <li>
         <h3>Create a chain and a wallet</h3>
         <p>Regtest gives you a private network with instant, easy blocks.</p>
-        <pre class="code">sump genesis
-sump wallet new</pre>
+        <pre class="code">sump --network regtest genesis
+sump --network regtest wallet new</pre>
       </li>
       <li>
         <h3>Mine to your own address</h3>
         <p>Block rewards land in your wallet; coinbases mature after a few blocks.</p>
-        <pre class="code">sump miner mine --blocks 6
-sump wallet balance</pre>
+        <pre class="code">sump --network regtest miner mine --blocks 6
+sump --network regtest wallet balance</pre>
       </li>
       <li>
         <h3>Or: one command, with a live dashboard</h3>

@@ -48,6 +48,9 @@ pub struct Shared {
     pub quiet: bool,
     /// Our own listen port (0 = not listening), advertised in Hello.
     listen_port: AtomicU16,
+    /// Highest peer height observed in handshakes. Miners use this to avoid
+    /// starting before the local chain has caught up to known public peers.
+    best_peer_height: AtomicU64,
     /// Known reachable peer addresses (the address book).
     book: Mutex<HashSet<SocketAddr>>,
     /// Addresses we are currently connected to or dialing (dedup dials).
@@ -114,6 +117,7 @@ fn log(shared: &Shared, msg: &str) {
 impl NetNode {
     pub fn new(chain: ChainState, chain_path: Option<PathBuf>, quiet: bool) -> NetNode {
         let network_id = chain.params().network.id();
+        let height = chain.height();
         NetNode {
             shared: Arc::new(Shared {
                 network_id,
@@ -124,6 +128,7 @@ impl NetNode {
                 chain_path,
                 quiet,
                 listen_port: AtomicU16::new(0),
+                best_peer_height: AtomicU64::new(height),
                 book: Mutex::new(HashSet::new()),
                 connected: Mutex::new(HashSet::new()),
                 inbound: Mutex::new(HashMap::new()),
@@ -147,6 +152,10 @@ impl NetNode {
 
     pub fn peer_count(&self) -> usize {
         self.shared.peers.lock().unwrap().len()
+    }
+
+    pub fn best_peer_height(&self) -> u64 {
+        self.shared.best_peer_height.load(Ordering::SeqCst)
     }
 
     pub fn mempool_len(&self) -> usize {
@@ -211,36 +220,42 @@ impl NetNode {
         {
             let mut book = self.shared.book.lock().unwrap();
             for s in seeds {
-                if let Ok(mut it) = s.to_socket_addrs() {
-                    if let Some(a) = it.next() {
-                        book.insert(a);
+                match s.to_socket_addrs() {
+                    Ok(it) => {
+                        for a in it {
+                            if a.port() != 0 && !a.ip().is_unspecified() {
+                                book.insert(a);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log(&self.shared, &format!("seed {s} did not resolve: {e}"));
                     }
                 }
             }
         }
         let shared = self.shared.clone();
         thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(5));
             let have = shared.peers.lock().unwrap().len();
-            if have >= TARGET_PEERS {
-                continue;
+            if have < TARGET_PEERS {
+                // dial book addresses we are not already connected to / dialing
+                let candidates: Vec<SocketAddr> = {
+                    let connected = shared.connected.lock().unwrap();
+                    shared
+                        .book
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|a| !connected.contains(a))
+                        .take(TARGET_PEERS - have)
+                        .copied()
+                        .collect()
+                };
+                for a in candidates {
+                    dial(&shared, a);
+                }
             }
-            // dial book addresses we are not already connected to / dialing
-            let candidates: Vec<SocketAddr> = {
-                let connected = shared.connected.lock().unwrap();
-                shared
-                    .book
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .filter(|a| !connected.contains(a))
-                    .take(TARGET_PEERS - have)
-                    .copied()
-                    .collect()
-            };
-            for a in candidates {
-                dial(&shared, a);
-            }
+            thread::sleep(Duration::from_secs(5));
         });
     }
 
@@ -474,6 +489,7 @@ fn handle_message(
             listen_port,
             ..
         } => {
+            shared.best_peer_height.fetch_max(height, Ordering::SeqCst);
             // learn the peer's reachable address: for inbound peers, combine
             // the observed source IP with the advertised listen port
             if listen_port != 0 {

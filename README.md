@@ -34,37 +34,37 @@ cargo test
 ## Regtest walkthrough
 
 ```
-# create a chain and two wallets
-cargo run -- genesis
-cargo run -- wallet new --wallet alice.json
-cargo run -- wallet new --wallet bob.json
+# create a local regtest chain and two wallets
+cargo run -- --network regtest genesis
+cargo run -- --network regtest wallet new --wallet alice.json
+cargo run -- --network regtest wallet new --wallet bob.json
 
 # mine 6 blocks to alice (regtest coinbase maturity is 5)
-cargo run -- miner mine --wallet alice.json --blocks 6
-cargo run -- wallet balance --wallet alice.json
+cargo run -- --network regtest miner mine --wallet alice.json --blocks 6
+cargo run -- --network regtest wallet balance --wallet alice.json
 
 # pay bob 5.5 SUMP; the tx waits in the mempool until mined
-cargo run -- wallet send --wallet alice.json --to <bob-address> --amount 5.5
-cargo run -- miner mine --wallet alice.json --blocks 1
-cargo run -- wallet balance --wallet bob.json
+cargo run -- --network regtest wallet send --wallet alice.json --to <bob-address> --amount 5.5
+cargo run -- --network regtest miner mine --wallet alice.json --blocks 1
+cargo run -- --network regtest wallet balance --wallet bob.json
 
 # hash-based vault addresses (SLH-DSA) for cold storage
-cargo run -- wallet vault-address --wallet alice.json   # sump1... (version 1)
-cargo run -- wallet send --wallet alice.json --to <vault-address> --amount 100
+cargo run -- --network regtest wallet vault-address --wallet alice.json
+cargo run -- --network regtest wallet send --wallet alice.json --to <vault-address> --amount 100
 
 # inspect / fully re-validate the chain from disk
-cargo run -- node info
-cargo run -- node validate
+cargo run -- --network regtest node info
+cargo run -- --network regtest node validate
 ```
 
 ## Running a networked node
 
 ```
 # terminal 1: listen and mine
-cargo run -- node run --listen 127.0.0.1:8776 --mine --wallet alice.json
+cargo run -- --network regtest node run --listen 127.0.0.1:8776 --mine --wallet alice.json
 
 # terminal 2 (separate --chain-dir): connect and sync
-cargo run -- --chain-dir ./sumpchain2 node run --listen 127.0.0.1:8777 --connect 127.0.0.1:8776
+cargo run -- --network regtest --chain-dir ./sumpchain2 node run --listen 127.0.0.1:8777 --connect 127.0.0.1:8776
 ```
 
 Peer connections are encrypted end-to-end with an ML-KEM-768 (FIPS 203)
@@ -75,7 +75,7 @@ files that `wallet send` drops into `<chain-dir>/mempool/`, relays them, and
 ## Mining with the dashboard (GUI)
 
 ```
-# one command: auto-creates genesis on first run, mines, serves a GUI
+# one command: initializes mainnet, connects to seeds, syncs, then mines
 cargo run --release -- node run --mine --gpu --gui
 ```
 
@@ -89,8 +89,10 @@ A prebuilt single-executable package is produced under `dist/`
 ## GPU mining
 
 ```
-# mine on the GPU (CUDA); falls back to CPU if unavailable
-cargo run --release -- miner mine --gpu --blocks 10
+# regtest-only standalone mining
+cargo run --release -- --network regtest miner mine --gpu --blocks 10
+
+# public mainnet mining stays connected and synced
 cargo run --release -- node run --mine --gpu
 ```
 
@@ -105,12 +107,13 @@ Benchmark CPU vs GPU throughput:
 cargo run --release -p sump-gpu --example bench
 ```
 
-Defaults: `--network regtest`, `--chain-dir ./sumpchain`. Mainnet parameters
-exist (`--network mainnet`) but mainnet genesis has not been cut.
+Defaults: `--network mainnet`, `--chain-dir ./sumpchain`. Mainnet has a fixed
+genesis and public bootstrap seed list in `Params::mainnet().seeds`; regtest
+must be selected explicitly with `--network regtest`.
 
 ## Status
 
-Pre-release, v0.4, pre-mainnet hardening complete (58 tests). Implemented and
+v0.5.4 mainnet hardening complete (58 tests). Implemented and
 tested: consensus core (validation, reorgs, emission, difficulty, PoW), P2P
 networking (ML-KEM encrypted transport, gossip, chain sync, mempool relay),
 the CUDA GPU miner (bit-identical to the CPU reference, ~238× a single CPU
@@ -119,9 +122,8 @@ adds decoder fuzzing (no panics on hostile input), property tests on the
 consensus math, an adversarial block-rejection matrix, reorg UTXO/mempool
 rollback, and multi-node convergence (in-process and live 3-process).
 
-Peer discovery is implemented (seed list + address gossip; a dialer keeps up
-to 8 outbound peers). Remaining before mainnet is not engineering: the
-one-time fair-launch parameters (`genesis_time`, `genesis_message`, `seeds`
-in `Params::mainnet()`) and the operational deployment of public seed nodes.
+Peer discovery is implemented (public seed list + address gossip; a dialer keeps
+up to 8 outbound peers). Mainnet miners wait for peers and catch-up sync before
+hashing so a double-click miner does not start on an isolated local network.
 The phase-2 STARK witness compression described in the whitepaper remains
 future work.

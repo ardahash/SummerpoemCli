@@ -53,8 +53,8 @@ pub struct Params {
     /// it (used on regtest, whose easy target is found in a few hashes).
     pub genesis_nonce: Option<u64>,
     pub address_hrp: &'static str,
-    /// Default seed nodes for peer discovery (host:port). Filled in for
-    /// mainnet at deployment; empty on regtest.
+    /// Default seed nodes for peer discovery (host:port). Non-empty on
+    /// mainnet; empty on regtest.
     pub seeds: &'static [&'static str],
 }
 
@@ -78,8 +78,9 @@ impl Params {
             genesis_message: "What if life was meant to be lived",
             genesis_nonce: Some(11_110_300), // verified; hash 60235b42...1ca0d
             address_hrp: "sump",
-            // Set at deployment: public seed node addresses.
-            seeds: &[],
+            // Public bootstrap seed. This hostname must be kept online for
+            // release builds; nodes learn more peers through address gossip.
+            seeds: &["seed.summerpoem.org:8776"],
         }
     }
 
@@ -110,6 +111,25 @@ impl Params {
         match n {
             Network::Mainnet => Params::mainnet(),
             Network::Regtest => Params::regtest(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mainnet_has_public_bootstrap_seed() {
+        let params = Params::mainnet();
+        assert!(!params.seeds.is_empty(), "mainnet needs a public seed");
+        for seed in params.seeds {
+            let (host, port) = seed.rsplit_once(':').expect("seed must be host:port");
+            assert!(!host.is_empty());
+            assert_eq!(port, "8776");
+            assert_ne!(host, "localhost");
+            assert!(!host.starts_with("127."));
+            assert_ne!(host, "0.0.0.0");
         }
     }
 }

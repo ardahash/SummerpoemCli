@@ -35,7 +35,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create the genesis block and initialize the chain directory
+    /// Initialize a regtest chain directory (mainnet genesis is built in)
     Genesis,
     /// Chain inspection and maintenance
     Node {
@@ -192,14 +192,10 @@ fn parse_sump(s: &str) -> Result<u64> {
         .ok_or_else(|| anyhow!("amount overflow"))
 }
 
-/// Create and persist the genesis block for this network. Genesis is fully
-/// deterministic from the network params, so every node produces the same
-/// genesis hash — this is safe to run lazily on first launch.
-/// Create and persist the genesis block using an already-built PoW context.
-/// Genesis mining needs the fast (full-dataset) path — at the pow limit it
-/// still takes millions of hash attempts, which the light cache cannot do in
-/// reasonable time.
-fn write_genesis(
+/// Persist the fixed network genesis as the first block in a fresh chain
+/// database. Mainnet uses a baked-in nonce; regtest may mine an easy local
+/// genesis for isolated testing.
+fn write_initial_chain(
     params: &Params,
     dir: &Path,
     ctx: &PowContext,
@@ -208,24 +204,33 @@ fn write_genesis(
     let block = genesis::build_genesis(params, ctx);
     let hash = block.header.hash();
     let state = ChainState::new(params.clone(), block)
-        .map_err(|e| anyhow!("genesis failed validation: {e}"))?;
+        .map_err(|e| anyhow!("initial genesis failed validation: {e}"))?;
     save_state(&state, dir)?;
     Ok(hash)
 }
 
-fn init_genesis(params: &Params, dir: &Path) -> Result<sump_core::Hash256> {
-    eprintln!("creating genesis block...");
+fn init_chain_from_genesis(params: &Params, dir: &Path) -> Result<sump_core::Hash256> {
+    if params.network == Network::Regtest {
+        eprintln!("creating regtest genesis block...");
+    } else {
+        eprintln!("initializing chain from built-in mainnet genesis...");
+    }
     // A light context suffices: a hardcoded-nonce genesis is only verified
     // (not mined), and regtest's easy target resolves in a few light hashes.
     let ctx = PowContext::new_light(&params.pow, 0);
-    write_genesis(params, dir, &ctx)
+    write_initial_chain(params, dir, &ctx)
 }
 
 fn load_state(params: &Params, dir: &Path) -> Result<ChainState> {
     let path = chain_file(dir);
     if !path.exists() {
+        let hint = if params.network == Network::Regtest {
+            "run `sump --network regtest genesis` first"
+        } else {
+            "run `sump node run` to initialize and sync"
+        };
         bail!(
-            "no chain at {} — run `sump genesis` first",
+            "no chain at {} - {hint}",
             path.display()
         );
     }
@@ -275,6 +280,24 @@ fn load_mempool(dir: &Path) -> Result<Vec<(PathBuf, Transaction)>> {
     Ok(out)
 }
 
+fn mainnet_mining_wait_reason(params: &Params, node: &sump_net::NetNode) -> Option<String> {
+    if params.network != Network::Mainnet {
+        return None;
+    }
+    let peers = node.peer_count();
+    if peers == 0 {
+        return Some("waiting for public peers before mining".into());
+    }
+    let local_height = node.height();
+    let best_peer_height = node.best_peer_height();
+    if local_height < best_peer_height {
+        return Some(format!(
+            "syncing before mining: local height {local_height}, peer height {best_peer_height}"
+        ));
+    }
+    None
+}
+
 /// Enable ANSI color escape processing on the Windows console so colored log
 /// output renders in cmd.exe/conhost as well as Windows Terminal.
 #[cfg(windows)]
@@ -305,12 +328,18 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Genesis => {
+            if params.network != Network::Regtest {
+                bail!(
+                    "`sump genesis` is regtest-only; mainnet genesis is built \
+                     into this release. Run `sump node run` to initialize and sync."
+                );
+            }
             let path = chain_file(&dir);
             if path.exists() {
                 bail!("chain already exists at {}", path.display());
             }
-            let hash = init_genesis(&params, &dir)?;
-            println!("genesis created: {hash}");
+            let hash = init_chain_from_genesis(&params, &dir)?;
+            println!("regtest genesis created: {hash}");
             println!("chain dir: {}", dir.display());
         }
 
@@ -342,12 +371,11 @@ fn main() -> Result<()> {
                     gui,
                     rpc,
                 } => {
-                    // First launch on this network: create the deterministic
-                    // genesis block automatically (verified from its hardcoded
-                    // nonce — fast) so the miner just works.
+                    // First launch: initialize the local database from the
+                    // fixed network genesis, then sync from peers.
                     if !chain_file(&dir).exists() {
-                        let hash = init_genesis(&params, &dir)?;
-                        println!("genesis: {hash}");
+                        let hash = init_chain_from_genesis(&params, &dir)?;
+                        println!("chain initialized from genesis: {hash}");
                     }
                     let state = load_state(&params, &dir)?;
                     // load the wallet if we mine or serve a GUI (for payout/balance)
@@ -381,6 +409,12 @@ fn main() -> Result<()> {
                     let mut seeds: Vec<String> =
                         params.seeds.iter().map(|s| s.to_string()).collect();
                     seeds.extend(connect.iter().cloned());
+                    if params.network == Network::Mainnet && seeds.is_empty() {
+                        bail!(
+                            "mainnet has no seed or --connect peer configured; \
+                             refusing to start an isolated node"
+                        );
+                    }
                     node.start_discovery(&seeds);
                     if !params.seeds.is_empty() {
                         println!("discovery: {} seed node(s)", params.seeds.len());
@@ -423,7 +457,7 @@ fn main() -> Result<()> {
                         let miner_stats = stats.clone();
                         miner_stats
                             .mining
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
                         miner_stats
                             .gpu
                             .store(gpu, std::sync::atomic::Ordering::Relaxed);
@@ -436,7 +470,30 @@ fn main() -> Result<()> {
                             // keep it small enough that the template refreshes
                             // often for new transactions.
                             let gpu_chunk = 1_048_576u32;
+                            let mut wait_reason = String::new();
                             loop {
+                                if let Some(reason) =
+                                    mainnet_mining_wait_reason(&miner_params, &miner_node)
+                                {
+                                    miner_stats
+                                        .mining
+                                        .store(false, Ordering::Relaxed);
+                                    if reason != wait_reason {
+                                        eprintln!("\x1b[36m[miner]\x1b[0m {reason}");
+                                        wait_reason = reason;
+                                    }
+                                    std::thread::sleep(std::time::Duration::from_secs(2));
+                                    continue;
+                                }
+                                if !wait_reason.is_empty() {
+                                    eprintln!(
+                                        "\x1b[36m[miner]\x1b[0m sync complete; mining starting"
+                                    );
+                                    wait_reason.clear();
+                                }
+                                miner_stats
+                                    .mining
+                                    .store(true, Ordering::Relaxed);
                                 let (mut template, height) = {
                                     let shared = miner_node.shared();
                                     let chain = shared.chain.lock().unwrap();
@@ -477,7 +534,17 @@ fn main() -> Result<()> {
                                 }
                             }
                         });
-                        println!("mining enabled ({})", if gpu { "GPU requested" } else { "CPU" });
+                        if params.network == Network::Mainnet {
+                            println!(
+                                "mining enabled ({}; waits for peers and sync)",
+                                if gpu { "GPU requested" } else { "CPU" }
+                            );
+                        } else {
+                            println!(
+                                "mining enabled ({})",
+                                if gpu { "GPU requested" } else { "CPU" }
+                            );
+                        }
                     }
 
                     // main loop: bridge wallet tx files from the mempool dir
@@ -573,6 +640,12 @@ fn main() -> Result<()> {
                 blocks,
                 gpu,
             } => {
+                if params.network == Network::Mainnet {
+                    bail!(
+                        "`sump miner mine` is disabled on mainnet because it \
+                         mines without peer sync; use `sump node run --mine --gpu --gui`."
+                    );
+                }
                 let w = Wallet::load(&wallet)?;
                 let mut state = load_state(&params, &dir)?;
                 let payout = w.key(sump_core::tx::SigScheme::MlDsa, 0).pubkey_hash();
