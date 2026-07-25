@@ -55,6 +55,8 @@ pub struct Shared {
     book: Mutex<HashSet<SocketAddr>>,
     /// Addresses we are currently connected to or dialing (dedup dials).
     connected: Mutex<HashSet<SocketAddr>>,
+    /// Addresses proven to be this node by the Hello nonce self-check.
+    self_addrs: Mutex<HashSet<SocketAddr>>,
     /// Live inbound connection counts per source IP.
     inbound: Mutex<HashMap<IpAddr, usize>>,
     /// Misbehavior score per IP; crossing BAN_SCORE bans the IP.
@@ -144,6 +146,7 @@ impl NetNode {
                 best_peer_height: AtomicU64::new(height),
                 book: Mutex::new(HashSet::new()),
                 connected: Mutex::new(HashSet::new()),
+                self_addrs: Mutex::new(HashSet::new()),
                 inbound: Mutex::new(HashMap::new()),
                 scores: Mutex::new(HashMap::new()),
                 banned: Mutex::new(HashMap::new()),
@@ -255,12 +258,14 @@ impl NetNode {
                 // dial book addresses we are not already connected to / dialing
                 let candidates: Vec<SocketAddr> = {
                     let connected = shared.connected.lock().unwrap();
+                    let self_addrs = shared.self_addrs.lock().unwrap();
                     shared
                         .book
                         .lock()
                         .unwrap()
                         .iter()
                         .filter(|a| !connected.contains(a))
+                        .filter(|a| !self_addrs.contains(a))
                         .take(TARGET_PEERS - have)
                         .copied()
                         .collect()
@@ -366,6 +371,9 @@ fn broadcast(shared: &Arc<Shared>, msg: &Message, except: Option<u64>) {
 /// Dial an outbound peer, deduplicating against in-flight/established dials.
 fn dial(shared: &Arc<Shared>, target: SocketAddr) {
     if is_banned(shared, target.ip()) {
+        return;
+    }
+    if shared.self_addrs.lock().unwrap().contains(&target) {
         return;
     }
     {
@@ -516,6 +524,11 @@ fn handle_message(
             // link is us talking to ourselves — drop it cleanly (no penalty)
             if nonce != 0 && nonce == shared.node_nonce {
                 log(shared, &format!("peer #{peer_id} is ourselves; dropping"));
+                let mut self_addrs = shared.self_addrs.lock().unwrap();
+                self_addrs.insert(peer.addr);
+                if let Some(advertised) = peer.advertised {
+                    self_addrs.insert(advertised);
+                }
                 peer.disconnect = true;
                 return Ok(());
             }
