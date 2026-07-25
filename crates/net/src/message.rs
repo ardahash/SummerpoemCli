@@ -6,7 +6,7 @@ use sump_core::encode::{put_u32, put_u64, put_u8, DecodeError, Reader};
 use sump_core::hash::Hash256;
 use sump_core::tx::Transaction;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_INV: usize = 2_000;
 pub const MAX_LOCATOR: usize = 64;
 pub const MAX_ADDRS: usize = 1_000;
@@ -23,6 +23,9 @@ pub enum Message {
         /// do not gossip). Combined with the observed source IP to form the
         /// peer's reachable address, avoiding self-IP detection.
         listen_port: u16,
+        /// Random per-node nonce chosen at startup. If a node ever receives
+        /// its own nonce back, it has connected to itself and drops the link.
+        nonce: u64,
     },
     Ping(u64),
     Pong(u64),
@@ -44,6 +47,9 @@ pub enum Message {
     GetAddr,
     /// Share known peer addresses (for discovery).
     Addr(Vec<SocketAddr>),
+    /// A message this version does not recognize (a newer peer's message
+    /// type). Ignored — this is what makes future additions non-breaking.
+    Unknown,
 }
 
 fn put_addr(out: &mut Vec<u8>, addr: &SocketAddr) {
@@ -92,12 +98,14 @@ impl Message {
                 height,
                 tip,
                 listen_port,
+                nonce,
             } => {
                 put_u8(&mut out, 1);
                 put_u32(&mut out, *version);
                 put_u64(&mut out, *height);
                 out.extend_from_slice(&tip.0);
                 out.extend_from_slice(&listen_port.to_le_bytes());
+                put_u64(&mut out, *nonce);
             }
             Message::Ping(n) => {
                 put_u8(&mut out, 2);
@@ -139,10 +147,17 @@ impl Message {
                     put_addr(&mut out, a);
                 }
             }
+            // never encoded — a decode-only sentinel
+            Message::Unknown => {}
         }
         out
     }
 
+    /// Decode a message. Forward-compatible: unknown message tags become
+    /// `Unknown` (ignored, not an error), and trailing bytes beyond the fields
+    /// this version knows are ignored — so a newer peer can add fields or
+    /// message types without breaking older nodes. Truncated messages still
+    /// error (the field reads hit end-of-input).
     pub fn decode(bytes: &[u8]) -> Result<Message, DecodeError> {
         let mut r = Reader::new(bytes);
         let msg = match r.read_u8()? {
@@ -151,6 +166,8 @@ impl Message {
                 height: r.read_u64()?,
                 tip: Hash256(r.read_array()?),
                 listen_port: u16::from_le_bytes(r.read_array::<2>()?),
+                // optional for forward/backward tolerance (0 = "no nonce")
+                nonce: if r.remaining() >= 8 { r.read_u64()? } else { 0 },
             },
             2 => Message::Ping(r.read_u64()?),
             3 => Message::Pong(r.read_u64()?),
@@ -176,9 +193,10 @@ impl Message {
                 }
                 Message::Addr(addrs)
             }
-            _ => return Err(DecodeError::Invalid("unknown message tag")),
+            _ => Message::Unknown,
         };
-        r.finish()?;
+        // NOTE: intentionally no `r.finish()` — trailing bytes are treated as
+        // fields from a newer protocol version and ignored.
         Ok(msg)
     }
 }
@@ -191,10 +209,11 @@ mod tests {
     fn roundtrip() {
         let msgs = vec![
             Message::Hello {
-                version: 1,
+                version: 2,
                 height: 42,
                 tip: Hash256([7u8; 32]),
                 listen_port: 8776,
+                nonce: 0x1122334455667788,
             },
             Message::Ping(9),
             Message::Pong(9),
@@ -218,5 +237,38 @@ mod tests {
         for m in msgs {
             assert_eq!(Message::decode(&m.encode()).unwrap(), m);
         }
+    }
+
+    #[test]
+    fn forward_compatible_decoding() {
+        // extra trailing bytes (a future field) are ignored, not an error
+        let mut ping = Message::Ping(7).encode();
+        ping.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        assert_eq!(Message::decode(&ping).unwrap(), Message::Ping(7));
+
+        // an unknown message tag decodes to Unknown (ignored, not banned)
+        assert_eq!(Message::decode(&[250, 1, 2, 3]).unwrap(), Message::Unknown);
+
+        // a Hello without the trailing nonce (an older/minimal peer) still
+        // decodes, with nonce defaulting to 0
+        let full = Message::Hello {
+            version: 2,
+            height: 5,
+            tip: Hash256([1u8; 32]),
+            listen_port: 8776,
+            nonce: 0,
+        }
+        .encode();
+        let without_nonce = &full[..full.len() - 8];
+        match Message::decode(without_nonce).unwrap() {
+            Message::Hello { nonce, listen_port, .. } => {
+                assert_eq!(nonce, 0);
+                assert_eq!(listen_port, 8776);
+            }
+            _ => panic!("expected Hello"),
+        }
+
+        // truncation is still caught
+        assert!(Message::decode(&[2, 1, 2]).is_err());
     }
 }

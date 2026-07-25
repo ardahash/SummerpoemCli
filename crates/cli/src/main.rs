@@ -58,6 +58,12 @@ enum Command {
 enum NodeCmd {
     /// Show chain status
     Info,
+    /// Show the software-version distribution of recent blocks (upgrade adoption)
+    Versions {
+        /// How many recent blocks to sample
+        #[arg(long, default_value_t = 200)]
+        blocks: u64,
+    },
     /// Re-validate the whole chain from genesis
     Validate,
     /// Validate a transaction file and place it in the mempool
@@ -351,11 +357,38 @@ fn main() -> Result<()> {
             match cmd {
                 NodeCmd::Info => {
                     let state = load_state(&params, &dir)?;
+                    println!("software: v{}", env!("CARGO_PKG_VERSION"));
                     println!("network:  {:?}", params.network);
                     println!("height:   {}", state.height());
                     println!("tip:      {}", state.tip_hash());
                     println!("supply:   {} SUMP", format_sump(state.supply()));
                     println!("utxos:    {}", state.utxos().len());
+                }
+                NodeCmd::Versions { blocks } => {
+                    let state = load_state(&params, &dir)?;
+                    let tip = state.height();
+                    let start = tip.saturating_sub(blocks.saturating_sub(1));
+                    let mut counts: std::collections::BTreeMap<String, u64> =
+                        std::collections::BTreeMap::new();
+                    let mut sampled = 0u64;
+                    for h in start..=tip {
+                        if let Some(block) = state.block_at(h) {
+                            let cb = &block.transactions[0].body.coinbase_data;
+                            let label = match sump_core::tx::coinbase_version(cb) {
+                                Some((a, b, c)) => format!("v{a}.{b}.{c}"),
+                                None => "pre-0.5.7 / unknown".to_string(),
+                            };
+                            *counts.entry(label).or_insert(0) += 1;
+                            sampled += 1;
+                        }
+                    }
+                    println!("software versions of the last {sampled} block(s):");
+                    let mut rows: Vec<_> = counts.into_iter().collect();
+                    rows.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+                    for (label, n) in rows {
+                        let pct = n.checked_mul(100).unwrap_or(0) / sampled.max(1);
+                        println!("  {label:<22} {n:>6}  ({pct}%)");
+                    }
                 }
                 NodeCmd::Validate => {
                     // load_state fully re-validates from genesis
@@ -402,7 +435,11 @@ fn main() -> Result<()> {
                     };
                     let node = sump_net::NetNode::new(state, Some(chain_file(&dir)), false);
                     let bound = node.listen(&listen)?;
-                    println!("listening on {bound} (network {:?})", params.network);
+                    println!(
+                        "Summerpoem v{} — listening on {bound} (network {:?})",
+                        env!("CARGO_PKG_VERSION"),
+                        params.network
+                    );
                     for peer in &connect {
                         match node.connect(peer) {
                             Ok(()) => println!("connecting to {peer}..."),

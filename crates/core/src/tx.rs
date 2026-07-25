@@ -11,6 +11,28 @@ pub const WITNESS_TAG: &[u8] = b"sump/witness/v1";
 pub const MAX_COINBASE_EXTRA: usize = 100;
 pub const MAX_TX_IO: usize = 100_000;
 
+/// Marker preceding the miner's software version in the coinbase extra data:
+/// `height(8) || COINBASE_VERSION_MARKER(4) || [major, minor, patch]`. Not
+/// consensus-relevant (the extra data is free-form), purely a signal so the
+/// network can observe which software version is producing blocks — the basis
+/// for gauging upgrade adoption before activating a consensus change.
+pub const COINBASE_VERSION_MARKER: [u8; 4] = *b"SUMP";
+
+/// Parse the miner's software version from a coinbase's data, if present.
+pub fn coinbase_version(coinbase_data: &[u8]) -> Option<(u8, u8, u8)> {
+    let start = 8; // after the height prefix
+    let end = start + 4;
+    if coinbase_data.len() >= end + 3 && coinbase_data[start..end] == COINBASE_VERSION_MARKER {
+        Some((
+            coinbase_data[end],
+            coinbase_data[end + 1],
+            coinbase_data[end + 2],
+        ))
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OutPoint {
     pub txid: Hash256,

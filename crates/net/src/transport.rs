@@ -20,7 +20,10 @@ use std::time::Duration;
 use sump_core::hash::shake256;
 
 const MAGIC: &[u8; 8] = b"SUMPNET1";
-const TRANSPORT_VERSION: u8 = 1;
+// v2 (0.5.6): self-connect nonce + forward-compatible message framing. Bumped
+// so 0.5.5 and 0.5.6 nodes reject each other cleanly at the header check
+// (no ban, no wasted handshake) rather than mismatching at the message layer.
+const TRANSPORT_VERSION: u8 = 2;
 pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 

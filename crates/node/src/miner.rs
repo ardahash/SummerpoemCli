@@ -8,6 +8,18 @@ use sump_core::emission::block_reward;
 use sump_core::tx::{Lock, SigScheme, Transaction, TxBody, TxOutput};
 use sump_pow::PowContext;
 
+/// This build's (major, minor, patch), parsed from the crate version.
+fn software_version() -> (u8, u8, u8) {
+    let mut it = env!("CARGO_PKG_VERSION")
+        .split('.')
+        .map(|s| s.parse::<u8>().unwrap_or(0));
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}
+
 /// Build an unmined block template on top of the current tip.
 /// `txs` are candidate mempool transactions; invalid or oversize ones are
 /// dropped silently.
@@ -49,8 +61,12 @@ pub fn build_block_template(
         included.push(tx.clone());
     }
 
+    // height prefix (required) + a software-version signal (free-form, not
+    // consensus-relevant): height(8) || "SUMP" || [major, minor, patch]
     let mut coinbase_data = height.to_le_bytes().to_vec();
-    coinbase_data.extend_from_slice(b"summerpoem");
+    coinbase_data.extend_from_slice(&sump_core::tx::COINBASE_VERSION_MARKER);
+    let (maj, min, pat) = software_version();
+    coinbase_data.extend_from_slice(&[maj, min, pat]);
     let coinbase = Transaction {
         body: TxBody {
             version: 1,

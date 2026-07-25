@@ -27,6 +27,31 @@ fn fresh_chain(ctx: &PowContext, params: &Params) -> ChainState {
 }
 
 #[test]
+fn self_connection_is_dropped() {
+    // a node that dials its own address (as can happen when discovery gossips
+    // it back) must detect the loop via the startup nonce and drop it — no
+    // stable self-peer should remain.
+    let params = Params::regtest();
+    let ctx = PowContext::new_full(&params.pow, 0);
+    let node = NetNode::new(fresh_chain(&ctx, &params), None, true);
+    let addr = node.listen("127.0.0.1:0").unwrap();
+    node.connect(&addr.to_string()).unwrap();
+    // give it time to connect, exchange Hello, detect self, and tear down
+    assert!(
+        wait_until(5, || node.peer_count() == 0),
+        "self-connection was not dropped (peers still {})",
+        node.peer_count()
+    );
+    // a real peer still connects fine (sanity: the drop is self-specific)
+    let other = NetNode::new(fresh_chain(&ctx, &params), None, true);
+    other.connect(&addr.to_string()).unwrap();
+    assert!(
+        wait_until(10, || node.peer_count() >= 1 && other.peer_count() >= 1),
+        "a genuine peer failed to connect"
+    );
+}
+
+#[test]
 fn three_node_transitive_sync() {
     let params = Params::regtest();
     let ctx = PowContext::new_full(&params.pow, 0);

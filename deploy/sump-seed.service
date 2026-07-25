@@ -1,0 +1,24 @@
+[Unit]
+Description=Summerpoem seed node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sump
+Group=sump
+# P2P seed on all interfaces. Add "--rpc 0.0.0.0:8788" if you want this node
+# to also serve the wallet RPC to light wallets (see SEED-SETUP.md).
+ExecStart=/usr/local/bin/sump --network mainnet --chain-dir /var/lib/sump node run --listen 0.0.0.0:8776
+Restart=on-failure
+RestartSec=5
+
+# hardening: the node needs nothing but its data dir and the network
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sump
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

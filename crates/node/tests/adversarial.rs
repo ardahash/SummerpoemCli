@@ -332,6 +332,23 @@ fn mempool_drops_conflicting_tx_after_block() {
 }
 
 #[test]
+fn mined_blocks_carry_software_version() {
+    // the miner stamps its version into the coinbase, and it parses back
+    let mut h = H::new();
+    h.mine(&[]);
+    let block = h.state.block_at(1).unwrap();
+    let cb = &block.transactions[0].body.coinbase_data;
+    let v = sump_core::tx::coinbase_version(cb).expect("version present in coinbase");
+    let expected: Vec<u8> = env!("CARGO_PKG_VERSION")
+        .split('.')
+        .map(|s| s.parse::<u8>().unwrap())
+        .collect();
+    assert_eq!(v, (expected[0], expected[1], expected[2]));
+    // a coinbase without the marker parses to None (backward-compatible)
+    assert!(sump_core::tx::coinbase_version(&[0u8; 8]).is_none());
+}
+
+#[test]
 fn mempool_rejects_underpriced_tx() {
     // a transaction paying below the minimum relay fee is rejected, so free
     // transactions cannot flood the pool

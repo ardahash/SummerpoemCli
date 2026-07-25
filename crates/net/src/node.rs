@@ -61,6 +61,19 @@ pub struct Shared {
     scores: Mutex<HashMap<IpAddr, i32>>,
     /// Banned IPs and the time their ban expires.
     banned: Mutex<HashMap<IpAddr, Instant>>,
+    /// Random per-startup nonce; used to detect and drop self-connections.
+    node_nonce: u64,
+}
+
+fn random_nonce() -> u64 {
+    let mut b = [0u8; 8];
+    let _ = getrandom::getrandom(&mut b);
+    let n = u64::from_le_bytes(b);
+    if n == 0 {
+        1
+    } else {
+        n
+    } // 0 means "no nonce" on the wire
 }
 
 fn is_banned(shared: &Shared, ip: IpAddr) -> bool {
@@ -134,6 +147,7 @@ impl NetNode {
                 inbound: Mutex::new(HashMap::new()),
                 scores: Mutex::new(HashMap::new()),
                 banned: Mutex::new(HashMap::new()),
+                node_nonce: random_nonce(),
             }),
         }
     }
@@ -420,6 +434,7 @@ fn run_peer(
             height: chain.height(),
             tip: chain.tip_hash(),
             listen_port: shared.listen_port.load(Ordering::SeqCst),
+            nonce: shared.node_nonce,
         });
     }
 
@@ -429,6 +444,7 @@ fn run_peer(
         addr,
         outbound,
         advertised: outbound.then_some(addr),
+        disconnect: false,
     };
     loop {
         let frame = match reader.recv() {
@@ -453,6 +469,10 @@ fn run_peer(
             misbehave(&shared, addr.ip(), BAN_SCORE);
             break;
         }
+        if peer_state.disconnect {
+            // clean disconnect (e.g. self-connection) — no penalty
+            break;
+        }
     }
 
     shared.peers.lock().unwrap().remove(&id);
@@ -473,6 +493,8 @@ struct PeerState {
     outbound: bool,
     /// The peer's reachable (listen) address once learned, for book/dedup.
     advertised: Option<SocketAddr>,
+    /// Set to drop this connection cleanly after the current message (no ban).
+    disconnect: bool,
 }
 
 fn handle_message(
@@ -487,8 +509,16 @@ fn handle_message(
             height,
             tip,
             listen_port,
+            nonce,
             ..
         } => {
+            // self-connection: we received our own startup nonce back, so this
+            // link is us talking to ourselves — drop it cleanly (no penalty)
+            if nonce != 0 && nonce == shared.node_nonce {
+                log(shared, &format!("peer #{peer_id} is ourselves; dropping"));
+                peer.disconnect = true;
+                return Ok(());
+            }
             shared.best_peer_height.fetch_max(height, Ordering::SeqCst);
             // learn the peer's reachable address: for inbound peers, combine
             // the observed source IP with the advertised listen port
@@ -651,6 +681,9 @@ fn handle_message(
                 }
             }
         }
+        // a message type this version does not understand — ignore it (this
+        // is what keeps future protocol additions non-breaking)
+        Message::Unknown => {}
     }
     Ok(())
 }
