@@ -562,6 +562,16 @@ fn main() -> Result<()> {
                                     let _ = std::fs::remove_file(&path);
                                 }
                                 Err(sump_node::MempoolError::Conflict) => {}
+                                Err(sump_node::MempoolError::LowFee { need }) => {
+                                    let _ = std::fs::remove_file(&path);
+                                    eprintln!(
+                                        "rejected {}: fee too low (need at least {need} stanzas)",
+                                        path.display()
+                                    );
+                                }
+                                Err(sump_node::MempoolError::Full) => {
+                                    // retry later once peers mine or relay blocks
+                                }
                                 Err(sump_node::MempoolError::Invalid(_)) => {
                                     // likely not yet valid (immature); retry later
                                 }
