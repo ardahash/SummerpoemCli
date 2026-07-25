@@ -1,137 +1,370 @@
 # Summerpoem (SUMP)
 
-A quantum-resistant proof-of-work cryptocurrency. See [WHITEPAPER.md](WHITEPAPER.md)
-for the full design.
+Summerpoem is a quantum-resistant proof-of-work cryptocurrency.
 
-- **Signatures:** ML-DSA-44 (FIPS 204) — no elliptic curves anywhere.
-  Optional SLH-DSA-128s (FIPS 205) "vault" addresses for hash-only security.
-- **Addresses:** bech32m over SHA3-256 public-key hashes (`sump1...`); the
-  version byte selects the signature scheme.
-- **PoW:** SumpHash v1 — Ethash-style memory-hard SHA3/SHAKE algorithm,
-  fixed 2 GiB dataset, 64 MiB light-verification cache.
-- **Difficulty:** per-block ASERT. **Emission:** smooth exponential decay,
-  42 M SUMP cap, ~4-year half-life. Base unit: the *stanza* (10⁻⁸ SUMP).
+- Coin name: **Summerpoem**
+- Symbol: **SUMP**
+- Base unit: **stanza** (`1 SUMP = 100,000,000 stanzas`)
+- Genesis message: `What if life was meant to be lived`
+- Mainnet genesis hash:
+  `60235b421eb3478072192851a1ea05eeb221dd8821aeaacb3fcd361abb21ca0d`
 
-## Workspace layout
+Summerpoem uses post-quantum signatures, a memory-hard GPU-friendly proof of
+work, and a Bitcoin-style UTXO ledger.
 
-| Crate | Contents |
+For the full technical design, read [WHITEPAPER.md](WHITEPAPER.md) and
+[DESIGN.md](DESIGN.md).
+
+## Download
+
+Download the latest Windows package from:
+
+https://github.com/ardahash/SummerpoemCli/releases/latest
+
+The release zip contains:
+
+| File | Purpose |
 |---|---|
-| `crates/core` | Canonical encoding, hashing, tx/block structures, merkle, emission, ASERT, compact bits, network params |
-| `crates/pow` | SumpHash v1 (cache/dataset generation, light + full compute, CPU miner loop) |
-| `crates/crypto` | ML-DSA-44 keys/signing/verification, bech32m addresses |
-| `crates/node` | Chain state, full validation, reorgs, mempool, block templates, genesis builder, flat-file store |
-| `crates/net` | P2P: ML-KEM-768 encrypted transport, block/tx gossip, chain sync |
-| `crates/gpu` | CUDA SumpHash miner (nvcc→PTX, driver-API launch), CPU-identical |
-| `crates/cli` | The `sump` binary: `genesis`, `node`, `wallet`, `miner` subcommands |
+| `sump.exe` | Full node, miner, local wallet commands, dashboard |
+| `sump-wallet.exe` | Standalone light wallet |
+| `Start Mining.bat` | Double-click launcher for node + GPU miner + dashboard |
+| `Open Wallet.bat` | Double-click launcher for standalone wallet GUI |
+| `Check Balance.bat` | Double-click balance/address helper |
+| `QUICKSTART.txt` | Short offline instructions |
 
-## Build & test
+No installer is required. Unzip the folder somewhere permanent and keep the
+files together.
 
+Windows may show SmartScreen because the binary is not code-signed yet. Choose
+**More info -> Run anyway** if you trust the release and checksums.
+
+## First: back up your wallet
+
+The file `wallet.json` is your key file. Anyone with it can spend your SUMP.
+If you lose it, no one can recover your coins.
+
+After creating a wallet, copy `wallet.json` to a safe backup location.
+
+## 1. Miner + Wallet
+
+This is the normal setup for someone who wants to mine SUMP.
+
+### Easiest path
+
+1. Unzip the release package.
+2. Double-click **`Start Mining.bat`**.
+3. On first run it creates `wallet.json`.
+4. Back up `wallet.json`.
+5. Leave the miner window open.
+6. Open the dashboard in your browser:
+
+```text
+http://127.0.0.1:8787
 ```
+
+The first mining launch prepares a 2 GiB SumpHash dataset. This can take a few
+minutes. The miner shows progress while it prepares the dataset.
+
+The dashboard shows:
+
+- block height
+- mining status
+- GPU/CPU mode
+- hashrate
+- spendable balance
+- pending immature mining rewards
+- peer count
+- receive address and vault address
+
+### Open the wallet GUI
+
+With `Start Mining.bat` still running, double-click:
+
+```text
+Open Wallet.bat
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8799
+```
+
+This wallet GUI talks to your local node over RPC. `Start Mining.bat` already
+starts the node with RPC enabled.
+
+### Terminal path
+
+Open PowerShell in the unzipped folder and run:
+
+```powershell
+.\sump.exe wallet new
+```
+
+```powershell
+.\sump.exe node run --mine --gpu --gui --rpc
+```
+
+Useful options:
+
+```powershell
+# CPU mining instead of GPU
+.\sump.exe node run --mine --gui --rpc
+```
+
+```powershell
+# Terminal-only mining, no dashboard
+.\sump.exe node run --mine --gpu --rpc
+```
+
+```powershell
+# Mine while connecting to a specific peer
+.\sump.exe node run --mine --gpu --gui --rpc --connect seed.summerpoem.org:8776
+```
+
+GPU mining uses CUDA when available and falls back to CPU if unavailable.
+
+### Mining rewards are not spendable immediately
+
+Mining rewards are coinbase outputs. They mature after **100 blocks** on
+mainnet. The dashboard separates:
+
+- **Balance**: spendable SUMP
+- **Pending**: mined rewards still maturing
+
+## 2. Non-Mining Full Node
+
+Run this if you want to support the network, relay blocks/transactions, or
+serve wallet RPC without mining.
+
+### Simple full node
+
+```powershell
+.\sump.exe node run
+```
+
+This:
+
+- creates the mainnet genesis locally if needed
+- connects to built-in seeds
+- syncs the chain
+- listens on `0.0.0.0:8776`
+- relays blocks, transactions, and peer addresses
+
+### Full node with dashboard
+
+```powershell
+.\sump.exe node run --gui
+```
+
+Dashboard:
+
+```text
+http://127.0.0.1:8787
+```
+
+### Full node with wallet RPC
+
+If you want a standalone wallet to connect to this node:
+
+```powershell
+.\sump.exe node run --rpc
+```
+
+Local wallet RPC default:
+
+```text
+127.0.0.1:8788
+```
+
+To let other machines connect to your wallet RPC:
+
+```powershell
+.\sump.exe node run --rpc 0.0.0.0:8788
+```
+
+Only expose RPC publicly if you understand the DoS tradeoff. The RPC holds no
+private keys, but it still consumes node resources.
+
+### Firewall / router
+
+For a publicly reachable node, allow inbound TCP:
+
+```text
+8776
+```
+
+If the node is behind a home router, forward TCP `8776` to the node machine.
+
+Seed nodes:
+
+- `seed.summerpoem.org:8776`
+- `seed2.summerpoem.org:8776`
+
+Seed operators should also read [deploy/SEED-SETUP.md](deploy/SEED-SETUP.md).
+
+## 3. Just Wallet
+
+Use this if you only want to hold, receive, and send SUMP without mining or
+running a full node.
+
+The standalone wallet keeps your keys locally and connects to a node RPC for
+balances and transaction broadcast.
+
+You need a node RPC address, for example:
+
+```text
+127.0.0.1:8788
+```
+
+for your own local node, or a public/community RPC node if one is available.
+
+### Create a wallet
+
+```powershell
+.\sump-wallet.exe new
+```
+
+Back up `wallet.json`.
+
+### Show addresses
+
+```powershell
+.\sump-wallet.exe address
+```
+
+```powershell
+.\sump-wallet.exe vault-address
+```
+
+The regular address uses ML-DSA. The vault address uses SLH-DSA, a larger
+hash-based signature scheme intended for cold storage.
+
+### Open wallet GUI
+
+```powershell
+.\sump-wallet.exe gui --node 127.0.0.1:8788
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8799
+```
+
+If using a remote node:
+
+```powershell
+.\sump-wallet.exe gui --node example-node.example.com:8788
+```
+
+### Check balance
+
+```powershell
+.\sump-wallet.exe balance --node 127.0.0.1:8788
+```
+
+### Send SUMP
+
+```powershell
+.\sump-wallet.exe send --node 127.0.0.1:8788 --to <address> --amount 1.5
+```
+
+The wallet signs locally. The node only receives the signed transaction.
+
+## Useful commands
+
+```powershell
+# chain status
+.\sump.exe node info
+```
+
+```powershell
+# fully re-validate chain.dat from genesis
+.\sump.exe node validate
+```
+
+```powershell
+# recent miner software versions, useful before upgrades
+.\sump.exe node versions
+```
+
+```powershell
+# private local test chain
+.\sump.exe --network regtest node run --mine --gui
+```
+
+## Troubleshooting
+
+### I double-clicked `sump.exe` and nothing happened
+
+`sump.exe` is a command-line program. Use the `.bat` launchers, or run it from
+PowerShell with a command such as:
+
+```powershell
+.\sump.exe node run --mine --gpu --gui --rpc
+```
+
+### Miner says it is waiting for peers
+
+Mainnet mining waits until the node has a peer and is synced. This prevents
+accidentally mining an isolated fork.
+
+Check:
+
+- internet connection
+- firewall/router
+- inbound TCP `8776` if you want others to connect to you
+- seed reachability:
+  - `seed.summerpoem.org:8776`
+  - `seed2.summerpoem.org:8776`
+
+### GPU mining falls back to CPU
+
+Install/update the NVIDIA driver and CUDA runtime. CPU mining still works, but
+is slower.
+
+### Balance is zero after mining
+
+Freshly mined rewards mature after 100 blocks. Check the dashboard's
+**Pending** tile.
+
+### I am upgrading from an older version
+
+Stop the node/miner, replace the executables, and restart. Keep:
+
+- `wallet.json`
+- `sumpchain/` or your chosen `--chain-dir`
+
+Do not delete `chain.dat`.
+
+## Technical summary
+
+| Area | Summerpoem choice |
+|---|---|
+| Signatures | ML-DSA-44 by default; SLH-DSA vault addresses |
+| Address format | bech32m, SHA3-256 public-key hash |
+| Proof of work | SumpHash v1, fixed 2 GiB dataset, SHA3/SHAKE |
+| P2P transport | ML-KEM-768 handshake + ChaCha20-Poly1305 frames |
+| Difficulty | per-block ASERT |
+| Emission | 42M SUMP cap, smooth geometric decay |
+| Ledger | UTXO, segregated witnesses |
+
+## Developer build
+
+Install Rust, then:
+
+```powershell
 cargo build --release
 cargo test
 ```
 
-## Regtest walkthrough
+For release packaging on Windows, the project builds static executables and
+places release assets in `dist/`.
 
-```
-# create a local regtest chain and two wallets
-cargo run -- --network regtest genesis
-cargo run -- --network regtest wallet new --wallet alice.json
-cargo run -- --network regtest wallet new --wallet bob.json
+## Operator docs
 
-# mine 6 blocks to alice (regtest coinbase maturity is 5)
-cargo run -- --network regtest miner mine --wallet alice.json --blocks 6
-cargo run -- --network regtest wallet balance --wallet alice.json
+- Seed node setup: [deploy/SEED-SETUP.md](deploy/SEED-SETUP.md)
+- Upgrade policy: [deploy/UPGRADES.md](deploy/UPGRADES.md)
+- systemd service: [deploy/sump-seed.service](deploy/sump-seed.service)
 
-# pay bob 5.5 SUMP; the tx waits in the mempool until mined
-cargo run -- --network regtest wallet send --wallet alice.json --to <bob-address> --amount 5.5
-cargo run -- --network regtest miner mine --wallet alice.json --blocks 1
-cargo run -- --network regtest wallet balance --wallet bob.json
-
-# hash-based vault addresses (SLH-DSA) for cold storage
-cargo run -- --network regtest wallet vault-address --wallet alice.json
-cargo run -- --network regtest wallet send --wallet alice.json --to <vault-address> --amount 100
-
-# inspect / fully re-validate the chain from disk
-cargo run -- --network regtest node info
-cargo run -- --network regtest node validate
-```
-
-## Running a networked node
-
-```
-# terminal 1: listen and mine
-cargo run -- --network regtest node run --listen 127.0.0.1:8776 --mine --wallet alice.json
-
-# terminal 2 (separate --chain-dir): connect and sync
-cargo run -- --network regtest --chain-dir ./sumpchain2 node run --listen 127.0.0.1:8777 --connect 127.0.0.1:8776
-```
-
-Peer connections are encrypted end-to-end with an ML-KEM-768 (FIPS 203)
-handshake and ChaCha20-Poly1305 frames. A running node picks up transaction
-files that `wallet send` drops into `<chain-dir>/mempool/`, relays them, and
-(with `--mine`) includes them in blocks.
-
-Public seed/bootnode operators should run without dialing the built-in seed
-hostname, which may point back at the same machine:
-
-```
-sump --chain-dir /var/lib/summerpoem node run --listen 0.0.0.0:8776 --no-default-seeds
-```
-
-## Mining with the dashboard (GUI)
-
-```
-# one command: initializes mainnet, connects to seeds, syncs, then mines
-cargo run --release -- node run --mine --gpu --gui
-```
-
-Open the printed `http://127.0.0.1:8787` in a browser for a live dashboard
-(height, hashrate, balance, peers, mempool, addresses). Drop `--gpu` to mine
-on CPU; drop `--gui` for terminal-only.
-
-Prebuilt packages are produced under `dist/`:
-`summerpoem-v<version>-windows-x64.zip` and
-`summerpoem-v<version>-linux-x64.tar.gz`.
-
-## GPU mining
-
-```
-# regtest-only standalone mining
-cargo run --release -- --network regtest miner mine --gpu --blocks 10
-
-# public mainnet mining stays connected and synced
-cargo run --release -- node run --mine --gpu
-```
-
-Requires an NVIDIA CUDA toolkit at build time (nvcc compiles the kernel to
-PTX) and a CUDA-capable GPU at runtime. Without them the crate still builds
-and mining transparently uses the CPU. GPU output is bit-identical to the CPU
-reference — GPU-mined blocks verify under the standard rules.
-
-Benchmark CPU vs GPU throughput:
-
-```
-cargo run --release -p sump-gpu --example bench
-```
-
-Defaults: `--network mainnet`, `--chain-dir ./sumpchain`. Mainnet has a fixed
-genesis and public bootstrap seed list in `Params::mainnet().seeds`; regtest
-must be selected explicitly with `--network regtest`.
-
-## Status
-
-v0.5.5 mainnet hardening complete (58 tests). Implemented and
-tested: consensus core (validation, reorgs, emission, difficulty, PoW), P2P
-networking (ML-KEM encrypted transport, gossip, chain sync, mempool relay),
-the CUDA GPU miner (bit-identical to the CPU reference, ~238× a single CPU
-thread on an RTX 5070 Ti), and SLH-DSA vault addresses. The hardening pass
-adds decoder fuzzing (no panics on hostile input), property tests on the
-consensus math, an adversarial block-rejection matrix, reorg UTXO/mempool
-rollback, and multi-node convergence (in-process and live 3-process).
-
-Peer discovery is implemented (public seed list + address gossip; a dialer keeps
-up to 8 outbound peers). Mainnet miners wait for peers and catch-up sync before
-hashing so a double-click miner does not start on an isolated local network.
-The phase-2 STARK witness compression described in the whitepaper remains
-future work.
