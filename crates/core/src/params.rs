@@ -80,7 +80,7 @@ impl Params {
             address_hrp: "sump",
             // Public bootstrap seed. This hostname must be kept online for
             // release builds; nodes learn more peers through address gossip.
-            seeds: &["seed.summerpoem.org:8776", "46.62.224.182:8776"],
+            seeds: &["seed.summerpoem.org:8776", "seed2.summerpoem.org:8776"],
         }
     }
 
