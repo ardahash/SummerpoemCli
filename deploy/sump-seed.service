@@ -10,7 +10,8 @@ Group=sump
 # P2P seed on all interfaces. Add "--rpc 0.0.0.0:8788" if you want this node
 # to also serve the wallet RPC to light wallets (see SEED-SETUP.md).
 ExecStart=/usr/local/bin/sump --network mainnet --chain-dir /var/lib/sump node run --listen 0.0.0.0:8776
-Restart=on-failure
+# keep it running through crashes, clean exits, and reboots
+Restart=always
 RestartSec=5
 
 # hardening: the node needs nothing but its data dir and the network
