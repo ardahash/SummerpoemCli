@@ -72,6 +72,13 @@ handshake and ChaCha20-Poly1305 frames. A running node picks up transaction
 files that `wallet send` drops into `<chain-dir>/mempool/`, relays them, and
 (with `--mine`) includes them in blocks.
 
+Public seed/bootnode operators should run without dialing the built-in seed
+hostname, which may point back at the same machine:
+
+```
+sump --chain-dir /var/lib/summerpoem node run --listen 0.0.0.0:8776 --no-default-seeds
+```
+
 ## Mining with the dashboard (GUI)
 
 ```

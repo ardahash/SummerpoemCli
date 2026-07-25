@@ -71,6 +71,10 @@ enum NodeCmd {
         /// Peer address(es) to connect to (repeatable)
         #[arg(long)]
         connect: Vec<String>,
+        /// Do not dial built-in seed nodes. Use only for public seed/bootnode
+        /// operators that are themselves the bootstrap address.
+        #[arg(long)]
+        no_default_seeds: bool,
         /// Also mine blocks while running
         #[arg(long)]
         mine: bool,
@@ -365,6 +369,7 @@ fn main() -> Result<()> {
                 NodeCmd::Run {
                     listen,
                     connect,
+                    no_default_seeds,
                     mine,
                     gpu,
                     wallet,
@@ -406,17 +411,25 @@ fn main() -> Result<()> {
                     }
                     // peer discovery: seed the address book (explicit peers +
                     // network seed nodes) and maintain outbound connections
-                    let mut seeds: Vec<String> =
-                        params.seeds.iter().map(|s| s.to_string()).collect();
+                    let mut seeds: Vec<String> = if no_default_seeds {
+                        Vec::new()
+                    } else {
+                        params.seeds.iter().map(|s| s.to_string()).collect()
+                    };
                     seeds.extend(connect.iter().cloned());
-                    if params.network == Network::Mainnet && seeds.is_empty() {
+                    if params.network == Network::Mainnet
+                        && seeds.is_empty()
+                        && !no_default_seeds
+                    {
                         bail!(
                             "mainnet has no seed or --connect peer configured; \
                              refusing to start an isolated node"
                         );
                     }
                     node.start_discovery(&seeds);
-                    if !params.seeds.is_empty() {
+                    if no_default_seeds {
+                        println!("discovery: built-in seed dialing disabled");
+                    } else if !params.seeds.is_empty() {
                         println!("discovery: {} seed node(s)", params.seeds.len());
                     }
 

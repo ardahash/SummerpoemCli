@@ -30,6 +30,12 @@ Before packaging, confirm the public bootstrap seed is reachable at
 `seed.summerpoem.org:8776`. Do not ship a public miner if the seed hostname is
 missing, private-only, or pointed at an offline node.
 
+Recommended public seed-node command:
+
+```bash
+./sump --chain-dir /var/lib/summerpoem node run --listen 0.0.0.0:8776 --no-default-seeds
+```
+
 Recommended `Start Mining.bat` contents:
 
 ```bat
